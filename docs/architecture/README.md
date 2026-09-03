@@ -157,3 +157,7 @@ A module may be extracted only with evidence for independent scaling, failure or
 ## Logging and sensitive data
 
 Logs are structured and prepared for request/correlation context through `structlog.contextvars`. Log allow-listed identifiers, decision outcomes, timing, and safe error classes. Never log API keys, tokens, passwords, connection strings, raw prompts/responses, tool arguments/results, personal data, or credentials. Redaction must occur before the logger boundary; production transports and retention policies are deferred.
+
+The [initial threat model](../security/threat-model.md) records the current assets, trust
+boundaries, STRIDE-oriented risks, and prioritized security work. It is a living description of
+implemented controls and residual risk, not a claim of production security.

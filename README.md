@@ -110,4 +110,6 @@ Runtime execution is default-deny: an explicit ALLOW for the exact Tenant/Agent/
 
 Invocation input and output text are currently persisted for this first runtime/audit slice and returned by the Invocation API. Raw input/output and credentials are not logged. Redaction, retention, data classification, access controls, and encryption policy are not yet implemented, so this storage policy is not production-complete for sensitive workloads.
 
-The roadmap is documented in [ROADMAP.md](ROADMAP.md). VALOR is licensed under the [Apache License 2.0](LICENSE).
+The [initial threat model](docs/security/threat-model.md) documents current trust boundaries,
+material risks, and the recommended security sequence. The roadmap is documented in
+[ROADMAP.md](ROADMAP.md). VALOR is licensed under the [Apache License 2.0](LICENSE).
