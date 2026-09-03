@@ -28,6 +28,8 @@ jobs:
     env:
       VALOR_DATABASE__URL: postgresql+psycopg://valor:test-only@localhost:5432/valor_test
       VALOR_TEST_DATABASE_URL: postgresql+psycopg://valor:test-only@localhost:5432/valor_test
+      VALOR_SECURITY__MANAGEMENT_PRINCIPAL_ID: ci-management
+      VALOR_SECURITY__MANAGEMENT_TOKEN: test-only-ci-management-token-32-bytes
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

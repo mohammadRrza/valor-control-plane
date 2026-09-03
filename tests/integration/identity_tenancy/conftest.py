@@ -7,7 +7,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from valor.bootstrap.application import create_app
-from valor.bootstrap.settings import DatabaseSettings, Settings
+from valor.bootstrap.settings import DatabaseSettings, SecuritySettings, Settings
+
+TEST_MANAGEMENT_TOKEN = "test-only-management-token-32-bytes"
 
 
 @pytest.fixture
@@ -41,6 +43,15 @@ async def clean_tenants(tenant_database_url: str) -> AsyncIterator[None]:
 
 @pytest.fixture
 def postgres_client(tenant_database_url: str) -> Iterator[TestClient]:
-    settings = Settings(database=DatabaseSettings(url=tenant_database_url))
-    with TestClient(create_app(settings)) as client:
+    settings = Settings(
+        database=DatabaseSettings(url=tenant_database_url),
+        security=SecuritySettings(
+            management_principal_id="test-management",
+            management_token=TEST_MANAGEMENT_TOKEN,
+        ),
+    )
+    with TestClient(
+        create_app(settings),
+        headers={"Authorization": f"Bearer {TEST_MANAGEMENT_TOKEN}"},
+    ) as client:
         yield client

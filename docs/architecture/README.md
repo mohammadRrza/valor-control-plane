@@ -12,7 +12,7 @@ flowchart LR
   O[Platform Operators] --> V
 ```
 
-VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 established the operational shell; Phase 1 added Tenant, Agent, and governed Model reference slices. Phase 2 has one synchronous OpenAI path, now governed by explicit default-deny Agent-to-Model permission decisions; it is neither a complete gateway nor a general policy engine.
+VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 established the operational shell; Phase 1 added Tenant, Agent, and governed Model reference slices. Phase 2 has one synchronous OpenAI path governed by explicit default-deny Agent-to-Model permission decisions, with interim bearer authentication around management APIs; it is neither a complete gateway nor a general policy or identity platform.
 
 ## Current container and component view
 
@@ -33,6 +33,8 @@ flowchart TB
   INFRA --> OPENAI[OpenAI Responses API]
   APP --> POLICY[Policy & Risk domain]
   INFRA -. implements policy ports .-> POLICY
+  OP[Management operator] -->|Bearer credential| SEC[Management authentication]
+  SEC --> API
 ```
 
 The application is one deployable process. Operational routes are outside domain APIs. PostgreSQL is the only runtime dependency. The domain remains synchronous; async appears at I/O boundaries.
@@ -117,7 +119,15 @@ Each evaluated attempt creates a PolicyDecision with DecisionId, InvocationId, e
 
 The permission-management application independently validates Tenant existence and Agent/Model ownership using Policy-local ports/projections. Its shared-database adapter imports no owning-context aggregate or ORM row, and foreign keys remain authoritative against races. Runtime Gateway imports no Policy & Risk internals; a Policy infrastructure adapter implements the Runtime-owned decision port at composition time.
 
-Default deny materially improves runtime safety but does not make the deployment secure: policy management itself is unauthenticated. A reachable caller can grant ALLOW, so management and runtime APIs must remain isolated from untrusted networks until authentication and authorization exist. See ADR-0009.
+Default deny materially improves runtime safety. Policy management now requires the configured management bearer credential, so an anonymous caller cannot grant ALLOW. Tenant-scoped authorization and runtime-client authentication remain unresolved. See ADR-0009 and ADR-0010.
+
+### Management authentication boundary
+
+Tenant, Agent, Model, and Policy routes are management-plane APIs and share one FastAPI boundary dependency. It validates an environment-supplied bearer credential in constant time and produces a framework-independent `AuthenticatedPrincipal` containing only the stable configured principal ID and `management` kind. Missing or invalid credentials receive the same sanitized 401 Problem Details response and `WWW-Authenticate: Bearer`.
+
+The credential is a `SecretStr`, is unwrapped only during validation, and is never an audit identity, persistence value, response field, or logging field. Configuration fails fast if the principal ID or token is absent. This is authentication only: possession proves control of one global management credential and does not prove tenant-specific authority.
+
+Health endpoints remain public for infrastructure probes. Runtime endpoints remain separate and currently unauthenticated; the management credential is not interpreted as an Agent or runtime-client identity. Provider credentials remain server-side environment secrets. The planned security evolution is static management bearer token → authenticated principals → tenant-aware authorization → OIDC/enterprise identity integration.
 
 ## Dependency and transaction rules
 

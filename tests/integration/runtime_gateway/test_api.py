@@ -6,7 +6,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.integration.runtime_gateway.conftest import DeterministicRuntimeProvider
+from tests.integration.runtime_gateway.conftest import (
+    TEST_MANAGEMENT_TOKEN,
+    DeterministicRuntimeProvider,
+)
 
 
 def create_tenant(client: TestClient, name: str) -> UUID:
@@ -79,6 +82,145 @@ def assert_problem(response_status: int, content_type: str, body: dict[str, obje
     assert body.keys() >= {"type", "title", "status", "detail", "instance"}
     assert body["status"] == response_status
     assert content_type.startswith("application/problem+json")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("post", "/api/v1/tenants", {"name": "Anonymous Tenant"}),
+        (
+            "post",
+            "/api/v1/agents",
+            {"tenant_id": str(uuid4()), "name": "Anonymous Agent"},
+        ),
+        (
+            "post",
+            "/api/v1/models",
+            {
+                "tenant_id": str(uuid4()),
+                "name": "Anonymous Model",
+                "provider": "openai",
+                "provider_model_reference": "gpt-test",
+            },
+        ),
+        (
+            "put",
+            "/api/v1/policies/agent-model-permissions",
+            {
+                "tenant_id": str(uuid4()),
+                "agent_id": str(uuid4()),
+                "model_id": str(uuid4()),
+                "effect": "allow",
+            },
+        ),
+    ],
+)
+def test_management_mutations_require_authentication(
+    unauthenticated_runtime_client: TestClient,
+    method: str,
+    path: str,
+    payload: dict[str, str],
+) -> None:
+    response = unauthenticated_runtime_client.request(method, path, json=payload)
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+    assert_problem(response.status_code, response.headers["content-type"], response.json())
+
+
+@pytest.mark.integration
+def test_management_reads_and_invalid_credentials_are_rejected(
+    unauthenticated_runtime_client: TestClient,
+) -> None:
+    permission_id = uuid4()
+    anonymous = unauthenticated_runtime_client.get(
+        f"/api/v1/policies/agent-model-permissions/{permission_id}"
+    )
+    invalid = unauthenticated_runtime_client.get(
+        f"/api/v1/policies/agent-model-permissions/{permission_id}",
+        headers={"Authorization": "Bearer invalid"},
+    )
+    assert anonymous.status_code == invalid.status_code == 401
+    assert anonymous.json() == invalid.json()
+    assert "Bearer invalid" not in invalid.text
+
+
+@pytest.mark.integration
+def test_health_and_runtime_routes_do_not_require_management_credential(
+    unauthenticated_runtime_client: TestClient,
+) -> None:
+    assert unauthenticated_runtime_client.get("/health/live").status_code == 200
+    runtime = unauthenticated_runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json={
+            "tenant_id": str(uuid4()),
+            "agent_id": str(uuid4()),
+            "model_id": str(uuid4()),
+            "input": "No management credential",
+        },
+    )
+    assert runtime.status_code == 404
+    assert runtime.json()["title"] == "Runtime Resource Not Found"
+
+
+@pytest.mark.integration
+def test_anonymous_policy_mutation_cannot_bypass_default_deny(
+    unauthenticated_runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+) -> None:
+    auth = {"Authorization": f"Bearer {TEST_MANAGEMENT_TOKEN}"}
+    tenant_response = unauthenticated_runtime_client.post(
+        "/api/v1/tenants", json={"name": "Security Regression"}, headers=auth
+    )
+    assert tenant_response.status_code == 201
+    tenant_id = UUID(tenant_response.json()["id"])
+    agent_response = unauthenticated_runtime_client.post(
+        "/api/v1/agents",
+        json={"tenant_id": str(tenant_id), "name": "Security Agent"},
+        headers=auth,
+    )
+    model_response = unauthenticated_runtime_client.post(
+        "/api/v1/models",
+        json={
+            "tenant_id": str(tenant_id),
+            "name": "Security Model",
+            "provider": "openai",
+            "provider_model_reference": "gpt-test",
+        },
+        headers=auth,
+    )
+    agent_id = UUID(agent_response.json()["id"])
+    model_id = UUID(model_response.json()["id"])
+    permission_payload = {
+        "tenant_id": str(tenant_id),
+        "agent_id": str(agent_id),
+        "model_id": str(model_id),
+        "effect": "allow",
+    }
+
+    anonymous_allow = unauthenticated_runtime_client.put(
+        "/api/v1/policies/agent-model-permissions", json=permission_payload
+    )
+    assert anonymous_allow.status_code == 401
+    denied = unauthenticated_runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(tenant_id, agent_id, model_id),
+    )
+    assert denied.status_code == 403
+    assert runtime_provider.calls == []
+
+    authenticated_allow = unauthenticated_runtime_client.put(
+        "/api/v1/policies/agent-model-permissions",
+        json=permission_payload,
+        headers=auth,
+    )
+    assert authenticated_allow.status_code == 200
+    allowed = unauthenticated_runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(tenant_id, agent_id, model_id),
+    )
+    assert allowed.status_code == 201
+    assert runtime_provider.calls == [("gpt-test", "Explain zero trust.")]
 
 
 @pytest.mark.integration

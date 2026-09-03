@@ -8,7 +8,7 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 **Current phase: Phase 2 — Runtime Gateway (in progress).**
 
-Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; and Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes.
+Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; and static bearer authentication for management APIs.
 
 Planned: richer conditional policy, protected management APIs, human approval, tool/MCP governance, runtime routing and additional providers, evaluation, telemetry, FinOps, incident, and compliance capabilities. No bounded context, policy engine, or LLM gateway is complete.
 
@@ -24,7 +24,8 @@ Prerequisites: Python 3.13, [uv](https://docs.astral.sh/uv/), and optionally Doc
 
 ```bash
 cp .env.example .env
-# Replace example credentials before any non-local use.
+# Supply a stable management principal ID and a long random management token.
+# Replace every example credential before any non-local use.
 uv sync --frozen
 uv run uvicorn valor.main:create_app --factory --reload
 ```
@@ -44,7 +45,7 @@ make docker-up         # API + PostgreSQL
 make docker-down
 ```
 
-The API listens on port 8000. Operational endpoints are `/health/live` and `/health/ready`. Implemented domain routes are:
+The API listens on port 8000. Operational endpoints are `/health/live` and `/health/ready` and remain public. Send `Authorization: Bearer <management-token>` to every Tenant, Agent, Model, and Policy route. Runtime routes deliberately do not treat the management credential as a runtime identity. Implemented routes are:
 
 ```text
 POST /api/v1/tenants
@@ -86,6 +87,9 @@ src/valor/
     application/    permission set/get and default-deny evaluation
     infrastructure/ PostgreSQL policy persistence/admission/runtime adapter
     presentation/   permission HTTP contracts, routes, and errors
+  security/
+    application/    framework-independent authenticated management principal
+    presentation/   bearer parsing, constant-time validation, and HTTP error mapping
   infrastructure/  concrete adapters
   shared_kernel/   minimal framework-free primitives
 tests/             unit, integration, and architecture checks
@@ -97,9 +101,9 @@ docs/              architecture and decisions
 
 Never commit `.env`, secrets, tokens, credentials, or sensitive payloads. Logs must use allow-listed metadata and must not contain prompts or credentials. Treat migrations as reviewed production changes: provide reversible downgrades where safe and never edit an applied revision. Contributions should include proportionate tests, updated documentation, and pass every `make lint`, `make typecheck`, and `make test` check. Use Conventional Commit subjects (for example, `feat(identity): register tenant`) without adding commit tooling solely to enforce formatting.
 
-**Security status:** authentication and authorization are not implemented. Tenant, Agent, Model, and Runtime endpoints must not be exposed to untrusted networks. Model records remain governance references; OpenAI credentials come only from environment configuration and are not persisted or returned.
+**Security status:** Tenant, Agent, Model, and Policy management endpoints require an environment-configured static bearer token. It authenticates one stable global management principal but provides no tenant-scoped authorization, individual user identity, RBAC, OIDC/SSO, or credential lifecycle. It is an interim boundary and deployments must inject it securely and use TLS. The token is not persisted, logged, or returned.
 
-Runtime execution is now default-deny: an explicit ALLOW for the exact Tenant/Agent/Model tuple is required before the provider can run. Policy-management endpoints are also unauthenticated, however, so any caller who can reach them can grant ALLOW and defeat this governance control. They must not be exposed to untrusted networks.
+Runtime execution is default-deny: an explicit ALLOW for the exact Tenant/Agent/Model tuple is required before the provider can run. Anonymous callers cannot mutate that permission. Runtime-client authentication remains unresolved and is intentionally separate from management authentication; Runtime endpoints must not yet be exposed to untrusted networks.
 
 Invocation input and output text are currently persisted for this first runtime/audit slice and returned by the Invocation API. Raw input/output and credentials are not logged. Redaction, retention, data classification, access controls, and encryption policy are not yet implemented, so this storage policy is not production-complete for sensitive workloads.
 

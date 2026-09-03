@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import partial
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 from valor.ai_asset_registry.infrastructure.model_unit_of_work import SqlAlchemyModelUnitOfWork
 from valor.ai_asset_registry.infrastructure.tenant_existence import PostgresTenantExistence
@@ -31,6 +31,8 @@ from valor.runtime_gateway.infrastructure.openai_provider import OpenAIResponses
 from valor.runtime_gateway.infrastructure.unit_of_work import SqlAlchemyInvocationUnitOfWork
 from valor.runtime_gateway.presentation.errors import install_runtime_gateway_error_handlers
 from valor.runtime_gateway.presentation.routes import router as runtime_router
+from valor.security.presentation.authentication import require_management_principal
+from valor.security.presentation.errors import install_security_error_handlers
 
 
 def create_app(
@@ -75,14 +77,16 @@ def create_app(
     )
     app.state.settings = resolved
     app.include_router(health_router)
-    app.include_router(tenant_router, prefix="/api/v1")
-    app.include_router(agent_router, prefix="/api/v1")
-    app.include_router(model_router, prefix="/api/v1")
+    management_auth = [Depends(require_management_principal)]
+    app.include_router(tenant_router, prefix="/api/v1", dependencies=management_auth)
+    app.include_router(agent_router, prefix="/api/v1", dependencies=management_auth)
+    app.include_router(model_router, prefix="/api/v1", dependencies=management_auth)
     app.include_router(runtime_router, prefix="/api/v1")
-    app.include_router(policy_router, prefix="/api/v1")
+    app.include_router(policy_router, prefix="/api/v1", dependencies=management_auth)
     install_error_handlers(app)
     install_identity_tenancy_error_handlers(app)
     install_ai_asset_registry_error_handlers(app)
     install_runtime_gateway_error_handlers(app)
     install_policy_error_handlers(app)
+    install_security_error_handlers(app)
     return app

@@ -1,9 +1,9 @@
 """Centralized, environment-driven configuration."""
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, PostgresDsn, SecretStr
+from pydantic import BaseModel, Field, PostgresDsn, SecretStr, StringConstraints
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +30,13 @@ class ProviderSettings(BaseModel):
     timeout_seconds: float = Field(default=30, gt=0, le=300)
 
 
+class SecuritySettings(BaseModel):
+    management_principal_id: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ]
+    management_token: SecretStr = Field(min_length=32)
+
+
 class Settings(BaseSettings):
     """VALOR settings loaded once at the composition root."""
 
@@ -45,6 +52,7 @@ class Settings(BaseSettings):
     database: DatabaseSettings
     observability: ObservabilitySettings = ObservabilitySettings()
     provider: ProviderSettings = ProviderSettings()
+    security: SecuritySettings
 
 
 @lru_cache

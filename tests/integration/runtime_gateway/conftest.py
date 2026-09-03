@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from valor.bootstrap.application import create_app
-from valor.bootstrap.settings import DatabaseSettings, Settings
+from valor.bootstrap.settings import DatabaseSettings, SecuritySettings, Settings
 from valor.runtime_gateway.application.ports import (
     ProviderInvocationResult,
     ProviderTransportError,
@@ -24,6 +24,9 @@ class DeterministicRuntimeProvider:
         if self.fails:
             raise ProviderTransportError
         return ProviderInvocationResult(f"provider output for {input_text}")
+
+
+TEST_MANAGEMENT_TOKEN = "test-only-management-token-32-bytes"
 
 
 @pytest.fixture
@@ -65,6 +68,31 @@ def runtime_client(
     runtime_database_url: str,
     runtime_provider: DeterministicRuntimeProvider,
 ) -> Iterator[TestClient]:
-    settings = Settings(database=DatabaseSettings(url=runtime_database_url))
+    settings = Settings(
+        database=DatabaseSettings(url=runtime_database_url),
+        security=SecuritySettings(
+            management_principal_id="test-management",
+            management_token=TEST_MANAGEMENT_TOKEN,
+        ),
+    )
+    with TestClient(
+        create_app(settings, runtime_provider=runtime_provider),
+        headers={"Authorization": f"Bearer {TEST_MANAGEMENT_TOKEN}"},
+    ) as client:
+        yield client
+
+
+@pytest.fixture
+def unauthenticated_runtime_client(
+    runtime_database_url: str,
+    runtime_provider: DeterministicRuntimeProvider,
+) -> Iterator[TestClient]:
+    settings = Settings(
+        database=DatabaseSettings(url=runtime_database_url),
+        security=SecuritySettings(
+            management_principal_id="test-management",
+            management_token=TEST_MANAGEMENT_TOKEN,
+        ),
+    )
     with TestClient(create_app(settings, runtime_provider=runtime_provider)) as client:
         yield client
