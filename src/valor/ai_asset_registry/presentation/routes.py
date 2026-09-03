@@ -13,20 +13,16 @@ from valor.ai_asset_registry.application.register_agent import (
     RegisterAgentHandler,
 )
 from valor.ai_asset_registry.application.unit_of_work import AgentUnitOfWork
-from valor.ai_asset_registry.domain.agent import AgentId, OwningTenantId
+from valor.ai_asset_registry.domain.agent import AgentId
+from valor.ai_asset_registry.domain.ownership import OwningTenantId
+from valor.ai_asset_registry.presentation.dependencies import tenant_existence
 from valor.ai_asset_registry.presentation.schemas import AgentResponse, RegisterAgentRequest
 
 AgentUnitOfWorkFactory = Callable[[], AgentUnitOfWork]
-TenantExistenceFactory = Callable[[], TenantExistencePort]
 
 
 def agent_unit_of_work(request: Request) -> AgentUnitOfWork:
     factory = cast(AgentUnitOfWorkFactory, request.app.state.agent_unit_of_work_factory)
-    return factory()
-
-
-def tenant_existence(request: Request) -> TenantExistencePort:
-    factory = cast(TenantExistenceFactory, request.app.state.tenant_existence_factory)
     return factory()
 
 

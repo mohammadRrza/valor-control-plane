@@ -3,8 +3,9 @@ from uuid import UUID
 
 import pytest
 
-from valor.ai_asset_registry.domain.agent import Agent, AgentId, AgentName, OwningTenantId
+from valor.ai_asset_registry.domain.agent import Agent, AgentId, AgentName
 from valor.ai_asset_registry.domain.errors import InvalidAgentName
+from valor.ai_asset_registry.domain.ownership import OwningTenantId
 
 AGENT_ID = AgentId(UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
 TENANT_ID = OwningTenantId(UUID("11111111-1111-4111-8111-111111111111"))

@@ -19,13 +19,15 @@ def agent_database_url() -> str:
 
 
 @pytest.fixture(autouse=True)
-async def clean_agents_and_tenants(agent_database_url: str) -> AsyncIterator[None]:
+async def clean_assets_and_tenants(agent_database_url: str) -> AsyncIterator[None]:
     engine = create_async_engine(agent_database_url)
     async with engine.begin() as connection:
+        await connection.execute(text("DELETE FROM models"))
         await connection.execute(text("DELETE FROM agents"))
         await connection.execute(text("DELETE FROM tenants"))
     yield
     async with engine.begin() as connection:
+        await connection.execute(text("DELETE FROM models"))
         await connection.execute(text("DELETE FROM agents"))
         await connection.execute(text("DELETE FROM tenants"))
     await engine.dispose()

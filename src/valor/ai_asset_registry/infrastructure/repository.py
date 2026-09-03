@@ -9,7 +9,8 @@ from valor.ai_asset_registry.application.errors import (
     AgentNameAlreadyExists,
     OwningTenantNotFound,
 )
-from valor.ai_asset_registry.domain.agent import Agent, AgentId, AgentName, OwningTenantId
+from valor.ai_asset_registry.domain.agent import Agent, AgentId, AgentName
+from valor.ai_asset_registry.domain.ownership import OwningTenantId
 from valor.ai_asset_registry.infrastructure.models import AgentRow
 
 AGENT_NAME_UNIQUE_CONSTRAINT = "uq_agents_tenant_id_normalized_name"

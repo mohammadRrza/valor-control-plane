@@ -13,7 +13,8 @@ from valor.ai_asset_registry.application.errors import (
     AgentNameAlreadyExists,
     OwningTenantNotFound,
 )
-from valor.ai_asset_registry.domain.agent import Agent, AgentId, OwningTenantId
+from valor.ai_asset_registry.domain.agent import Agent, AgentId
+from valor.ai_asset_registry.domain.ownership import OwningTenantId
 from valor.ai_asset_registry.infrastructure.tenant_existence import PostgresTenantExistence
 from valor.ai_asset_registry.infrastructure.unit_of_work import SqlAlchemyAgentUnitOfWork
 from valor.identity_tenancy.domain.tenant import Tenant, TenantId

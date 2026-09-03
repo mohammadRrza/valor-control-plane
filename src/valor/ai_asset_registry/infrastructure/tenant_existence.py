@@ -3,7 +3,7 @@
 from sqlalchemy import Uuid, column, select, table
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from valor.ai_asset_registry.domain.agent import OwningTenantId
+from valor.ai_asset_registry.domain.ownership import OwningTenantId
 
 tenant_identity = table("tenants", column("id", Uuid()))
 

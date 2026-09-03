@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from valor.ai_asset_registry.domain.agent import OwningTenantId
+from valor.ai_asset_registry.domain.ownership import OwningTenantId
 
 
 class TenantExistencePort(Protocol):

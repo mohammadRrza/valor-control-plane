@@ -5,12 +5,12 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from valor.ai_asset_registry.infrastructure.models import AgentRow
+from valor.ai_asset_registry.infrastructure.models import AgentRow, ModelRow
 from valor.bootstrap.settings import get_settings
 from valor.identity_tenancy.infrastructure.models import TenantRow
 from valor.infrastructure.sqlalchemy import SqlAlchemyBase
 
-_mapped_rows = (TenantRow, AgentRow)
+_mapped_rows = (TenantRow, AgentRow, ModelRow)
 
 config = context.config
 if config.config_file_name is not None:

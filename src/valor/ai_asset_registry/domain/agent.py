@@ -5,19 +5,13 @@ from datetime import datetime
 from uuid import UUID
 
 from valor.ai_asset_registry.domain.errors import InvalidAgentName
+from valor.ai_asset_registry.domain.ownership import OwningTenantId
 
 MAX_AGENT_NAME_LENGTH = 100
 
 
 @dataclass(frozen=True, slots=True)
 class AgentId:
-    value: UUID
-
-
-@dataclass(frozen=True, slots=True)
-class OwningTenantId:
-    """Local representation of tenant identity at the context boundary."""
-
     value: UUID
 
 

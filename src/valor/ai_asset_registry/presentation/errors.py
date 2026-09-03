@@ -6,9 +6,15 @@ from fastapi.responses import JSONResponse
 from valor.ai_asset_registry.application.errors import (
     AgentNameAlreadyExists,
     AgentNotFound,
+    ModelNameAlreadyExists,
+    ModelNotFound,
     OwningTenantNotFound,
 )
-from valor.ai_asset_registry.domain.errors import InvalidAgentName
+from valor.ai_asset_registry.domain.errors import (
+    InvalidAgentName,
+    InvalidModelName,
+    InvalidProviderModelReference,
+)
 from valor.api.errors import problem_response
 
 
@@ -50,4 +56,44 @@ def install_ai_asset_registry_error_handlers(app: FastAPI) -> None:
             title="Agent Not Found",
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The requested Agent was not found.",
+        )
+
+    @app.exception_handler(InvalidModelName)
+    async def invalid_model_name(request: Request, exc: InvalidModelName) -> JSONResponse:
+        return problem_response(
+            request,
+            title="Invalid Model Name",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+
+    @app.exception_handler(InvalidProviderModelReference)
+    async def invalid_provider_reference(
+        request: Request, exc: InvalidProviderModelReference
+    ) -> JSONResponse:
+        return problem_response(
+            request,
+            title="Invalid Provider Model Reference",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+
+    @app.exception_handler(ModelNameAlreadyExists)
+    async def duplicate_model_name(request: Request, exc: ModelNameAlreadyExists) -> JSONResponse:
+        del exc
+        return problem_response(
+            request,
+            title="Model Name Already Exists",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A Model with the same normalized name already exists for this tenant.",
+        )
+
+    @app.exception_handler(ModelNotFound)
+    async def model_not_found(request: Request, exc: ModelNotFound) -> JSONResponse:
+        del exc
+        return problem_response(
+            request,
+            title="Model Not Found",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The requested Model was not found.",
         )
