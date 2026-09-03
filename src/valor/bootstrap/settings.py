@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, PostgresDsn, SecretStr, StringConstraints
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,6 +36,7 @@ class SecuritySettings(BaseModel):
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
     ]
     management_token: SecretStr = Field(min_length=32)
+    management_tenant_ids: frozenset[UUID]
 
 
 class Settings(BaseSettings):

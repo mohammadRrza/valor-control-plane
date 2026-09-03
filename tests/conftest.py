@@ -17,6 +17,7 @@ def settings() -> Settings:
         security=SecuritySettings(
             management_principal_id="test-management",
             management_token=TEST_MANAGEMENT_TOKEN,
+            management_tenant_ids=frozenset(),
         ),
     )
 

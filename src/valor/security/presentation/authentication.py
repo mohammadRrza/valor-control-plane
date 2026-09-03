@@ -28,4 +28,5 @@ def require_management_principal(
     return AuthenticatedPrincipal(
         principal_id=security.management_principal_id,
         principal_kind=PrincipalKind.MANAGEMENT,
+        authorized_tenant_ids=security.management_tenant_ids,
     )

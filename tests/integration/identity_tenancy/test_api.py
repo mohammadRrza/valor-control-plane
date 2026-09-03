@@ -1,6 +1,8 @@
-from uuid import uuid4
+from typing import cast
+from uuid import UUID, uuid4
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
@@ -12,9 +14,24 @@ def test_create_then_get_tenant(postgres_client: TestClient) -> None:
     assert body["name"] == "Acme Research"
     assert created.headers["location"] == f"/api/v1/tenants/{body['id']}"
 
+    tenant_id = UUID(body["id"])
+    app = cast(FastAPI, postgres_client.app)
+    app.state.settings.security.management_tenant_ids = frozenset({tenant_id})
+
     retrieved = postgres_client.get(f"/api/v1/tenants/{body['id']}")
     assert retrieved.status_code == 200
     assert retrieved.json() == body
+
+
+@pytest.mark.integration
+def test_authenticated_creation_does_not_automatically_grant_tenant_scope(
+    postgres_client: TestClient,
+) -> None:
+    created = postgres_client.post("/api/v1/tenants", json={"name": "Provisioned Tenant"})
+    assert created.status_code == 201
+    denied = postgres_client.get(f"/api/v1/tenants/{created.json()['id']}")
+    assert denied.status_code == 404
+    assert denied.json()["title"] == "Tenant Not Found"
 
 
 @pytest.mark.integration

@@ -12,3 +12,4 @@ ADRs record decisions at the time they are made. Supersede rather than silently 
 - [ADR-0008](0008-infrastructure-extraction.md) — extraction criteria
 - [ADR-0009](0009-default-deny-runtime-admission.md) — default-deny Agent-to-Model runtime admission
 - [ADR-0010](0010-static-management-bearer-authentication.md) — interim static management bearer authentication
+- [ADR-0011](0011-tenant-scoped-management-authorization.md) — fail-closed Tenant-scoped management authorization

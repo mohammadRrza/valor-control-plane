@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response, status
 
+from valor.ai_asset_registry.application.errors import ModelNotFound, OwningTenantNotFound
 from valor.ai_asset_registry.application.get_model import GetModelHandler, GetModelQuery
 from valor.ai_asset_registry.application.model_unit_of_work import ModelUnitOfWork
 from valor.ai_asset_registry.application.ports import TenantExistencePort
@@ -20,6 +21,10 @@ from valor.ai_asset_registry.presentation.model_schemas import (
     ModelResponse,
     RegisterModelRequest,
 )
+from valor.security.application.authorization import authorize_tenant
+from valor.security.application.errors import TenantManagementAccessDenied
+from valor.security.application.principal import AuthenticatedPrincipal
+from valor.security.presentation.authentication import require_management_principal
 
 ModelUnitOfWorkFactory = Callable[[], ModelUnitOfWork]
 
@@ -38,7 +43,12 @@ async def register_model(
     response: Response,
     unit_of_work: Annotated[ModelUnitOfWork, Depends(model_unit_of_work)],
     owning_tenant: Annotated[TenantExistencePort, Depends(tenant_existence)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
 ) -> ModelResponse:
+    try:
+        authorize_tenant(principal, payload.tenant_id)
+    except TenantManagementAccessDenied as exc:
+        raise OwningTenantNotFound(OwningTenantId(payload.tenant_id)) from exc
     command = RegisterModelCommand(
         tenant_id=OwningTenantId(payload.tenant_id),
         name=payload.name,
@@ -54,6 +64,11 @@ async def register_model(
 async def get_model(
     model_id: UUID,
     unit_of_work: Annotated[ModelUnitOfWork, Depends(model_unit_of_work)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
 ) -> ModelResponse:
     model = await GetModelHandler(unit_of_work)(GetModelQuery(ModelId(model_id)))
+    try:
+        authorize_tenant(principal, model.tenant_id.value)
+    except TenantManagementAccessDenied as exc:
+        raise ModelNotFound(ModelId(model_id)) from exc
     return ModelResponse.from_domain(model)

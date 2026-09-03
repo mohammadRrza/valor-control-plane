@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID
 
 
 class PrincipalKind(StrEnum):
@@ -12,6 +13,7 @@ class PrincipalKind(StrEnum):
 class AuthenticatedPrincipal:
     principal_id: str
     principal_kind: PrincipalKind
+    authorized_tenant_ids: frozenset[UUID]
 
     def __post_init__(self) -> None:
         if not self.principal_id.strip():

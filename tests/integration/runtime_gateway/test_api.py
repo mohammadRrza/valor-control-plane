@@ -2,6 +2,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -15,7 +16,10 @@ from tests.integration.runtime_gateway.conftest import (
 def create_tenant(client: TestClient, name: str) -> UUID:
     response = client.post("/api/v1/tenants", json={"name": name})
     assert response.status_code == 201
-    return UUID(response.json()["id"])
+    tenant_id = UUID(response.json()["id"])
+    security = cast(FastAPI, client.app).state.settings.security
+    security.management_tenant_ids = security.management_tenant_ids | {tenant_id}
+    return tenant_id
 
 
 def create_agent(client: TestClient, tenant_id: UUID, name: str) -> UUID:
@@ -82,6 +86,120 @@ def assert_problem(response_status: int, content_type: str, body: dict[str, obje
     assert body.keys() >= {"type", "title", "status", "detail", "instance"}
     assert body["status"] == response_status
     assert content_type.startswith("application/problem+json")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_tenant_scoped_management_authorization_is_non_disclosing_and_fail_closed(
+    runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+    runtime_database_url: str,
+) -> None:
+    tenant_a_response = runtime_client.post("/api/v1/tenants", json={"name": "Scope A"})
+    tenant_b_response = runtime_client.post("/api/v1/tenants", json={"name": "Scope B"})
+    assert tenant_a_response.status_code == tenant_b_response.status_code == 201
+    tenant_a = UUID(tenant_a_response.json()["id"])
+    tenant_b = UUID(tenant_b_response.json()["id"])
+
+    security = cast(FastAPI, runtime_client.app).state.settings.security
+    security.management_tenant_ids = frozenset({tenant_a, tenant_b})
+    agent_a = create_agent(runtime_client, tenant_a, "Agent A")
+    model_a = create_model(runtime_client, tenant_a, "Model A")
+    agent_b = create_agent(runtime_client, tenant_b, "Agent B")
+    model_b = create_model(runtime_client, tenant_b, "Model B")
+    audit_agent_b = create_agent(runtime_client, tenant_b, "Audit Agent B")
+    audit_model_b = create_model(runtime_client, tenant_b, "Audit Model B")
+    denied_permission_b = set_permission(
+        runtime_client, tenant_b, audit_agent_b, audit_model_b, "deny"
+    )
+
+    security.management_tenant_ids = frozenset({tenant_a})
+    assert runtime_client.get(f"/api/v1/tenants/{tenant_a}").status_code == 200
+    assert runtime_client.get(f"/api/v1/tenants/{tenant_b}").status_code == 404
+    assert runtime_client.get(f"/api/v1/agents/{agent_a}").status_code == 200
+    assert runtime_client.get(f"/api/v1/agents/{agent_b}").status_code == 404
+    assert runtime_client.get(f"/api/v1/models/{model_a}").status_code == 200
+    assert runtime_client.get(f"/api/v1/models/{model_b}").status_code == 404
+    assert (
+        runtime_client.get(
+            f"/api/v1/policies/agent-model-permissions/{denied_permission_b['id']}"
+        ).status_code
+        == 404
+    )
+
+    assert (
+        runtime_client.post(
+            "/api/v1/agents",
+            json={"tenant_id": str(tenant_a), "name": "Another Agent A"},
+        ).status_code
+        == 201
+    )
+    assert (
+        runtime_client.post(
+            "/api/v1/agents",
+            json={"tenant_id": str(tenant_b), "name": "Another Agent B"},
+        ).status_code
+        == 404
+    )
+    assert (
+        runtime_client.post(
+            "/api/v1/models",
+            json={
+                "tenant_id": str(tenant_a),
+                "name": "Another Model A",
+                "provider": "openai",
+                "provider_model_reference": "gpt-test",
+            },
+        ).status_code
+        == 201
+    )
+    assert (
+        runtime_client.post(
+            "/api/v1/models",
+            json={
+                "tenant_id": str(tenant_b),
+                "name": "Another Model B",
+                "provider": "openai",
+                "provider_model_reference": "gpt-test",
+            },
+        ).status_code
+        == 404
+    )
+
+    set_permission(runtime_client, tenant_a, agent_a, model_a, "allow")
+    unauthorized_allow = runtime_client.put(
+        "/api/v1/policies/agent-model-permissions",
+        json={
+            "tenant_id": str(tenant_b),
+            "agent_id": str(agent_b),
+            "model_id": str(model_b),
+            "effect": "allow",
+        },
+    )
+    assert unauthorized_allow.status_code == 404
+    denied_runtime = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(tenant_b, agent_b, model_b),
+    )
+    assert denied_runtime.status_code == 403
+    assert runtime_provider.calls == []
+
+    engine = create_async_engine(runtime_database_url)
+    async with engine.connect() as connection:
+        target_permission_count = await connection.scalar(
+            text(
+                "SELECT count(*) FROM agent_model_permissions "
+                "WHERE tenant_id = :tenant_id AND agent_id = :agent_id AND model_id = :model_id"
+            ),
+            {"tenant_id": tenant_b, "agent_id": agent_b, "model_id": model_b},
+        )
+        decision_permission_id = await connection.scalar(
+            text("SELECT permission_id FROM policy_decisions WHERE id = :decision_id"),
+            {"decision_id": UUID(denied_runtime.json()["decision_id"])},
+        )
+    await engine.dispose()
+    assert target_permission_count == 0
+    assert decision_permission_id is None
 
 
 @pytest.mark.integration
@@ -174,6 +292,8 @@ def test_anonymous_policy_mutation_cannot_bypass_default_deny(
     )
     assert tenant_response.status_code == 201
     tenant_id = UUID(tenant_response.json()["id"])
+    security = cast(FastAPI, unauthenticated_runtime_client.app).state.settings.security
+    security.management_tenant_ids = frozenset({tenant_id})
     agent_response = unauthenticated_runtime_client.post(
         "/api/v1/agents",
         json={"tenant_id": str(tenant_id), "name": "Security Agent"},

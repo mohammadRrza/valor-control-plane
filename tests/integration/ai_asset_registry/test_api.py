@@ -1,13 +1,18 @@
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
 def create_tenant(client: TestClient, name: str) -> UUID:
     response = client.post("/api/v1/tenants", json={"name": name})
     assert response.status_code == 201
-    return UUID(response.json()["id"])
+    tenant_id = UUID(response.json()["id"])
+    security = cast(FastAPI, client.app).state.settings.security
+    security.management_tenant_ids = security.management_tenant_ids | {tenant_id}
+    return tenant_id
 
 
 def assert_problem(response_status: int, content_type: str, body: dict[str, object]) -> None:

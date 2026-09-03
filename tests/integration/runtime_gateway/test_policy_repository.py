@@ -1,7 +1,9 @@
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import UUID
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -15,6 +17,9 @@ NOW = datetime(2026, 3, 4, 5, 6, tzinfo=UTC)
 
 def create_references(client: TestClient) -> tuple[UUID, UUID, UUID]:
     tenant = client.post("/api/v1/tenants", json={"name": "Policy Repo Tenant"}).json()["id"]
+    tenant_id = UUID(tenant)
+    security = cast(FastAPI, client.app).state.settings.security
+    security.management_tenant_ids = frozenset({tenant_id})
     agent = client.post(
         "/api/v1/agents", json={"tenant_id": tenant, "name": "Policy Repo Agent"}
     ).json()["id"]
@@ -27,7 +32,7 @@ def create_references(client: TestClient) -> tuple[UUID, UUID, UUID]:
             "provider_model_reference": "gpt-test",
         },
     ).json()["id"]
-    return UUID(tenant), UUID(agent), UUID(model)
+    return tenant_id, UUID(agent), UUID(model)
 
 
 def permission(

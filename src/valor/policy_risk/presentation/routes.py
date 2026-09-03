@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 
+from valor.policy_risk.application.errors import PermissionNotFound, PolicyTenantNotAvailable
 from valor.policy_risk.application.get_permission import (
     GetAgentModelPermissionHandler,
     GetAgentModelPermissionQuery,
@@ -23,6 +24,10 @@ from valor.policy_risk.presentation.schemas import (
     AgentModelPermissionResponse,
     SetAgentModelPermissionRequest,
 )
+from valor.security.application.authorization import authorize_tenant
+from valor.security.application.errors import TenantManagementAccessDenied
+from valor.security.application.principal import AuthenticatedPrincipal
+from valor.security.presentation.authentication import require_management_principal
 
 PolicyUnitOfWorkFactory = Callable[[], PolicyUnitOfWork]
 
@@ -52,7 +57,12 @@ async def set_permission(
         tuple[PolicyTenantLookupPort, PolicyAgentLookupPort, PolicyModelLookupPort],
         Depends(policy_admission),
     ],
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
 ) -> AgentModelPermissionResponse:
+    try:
+        authorize_tenant(principal, payload.tenant_id)
+    except TenantManagementAccessDenied as exc:
+        raise PolicyTenantNotAvailable(TenantId(payload.tenant_id)) from exc
     tenants, agents, models = admission
     permission = await SetAgentModelPermissionHandler(uow, tenants, agents, models)(
         SetAgentModelPermissionCommand(
@@ -69,8 +79,13 @@ async def set_permission(
 async def get_permission(
     permission_id: UUID,
     uow: Annotated[PolicyUnitOfWork, Depends(policy_uow)],
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
 ) -> AgentModelPermissionResponse:
     permission = await GetAgentModelPermissionHandler(uow)(
         GetAgentModelPermissionQuery(PermissionId(permission_id))
     )
+    try:
+        authorize_tenant(principal, permission.tenant_id.value)
+    except TenantManagementAccessDenied as exc:
+        raise PermissionNotFound(PermissionId(permission_id)) from exc
     return AgentModelPermissionResponse.from_domain(permission)

@@ -119,15 +119,17 @@ Each evaluated attempt creates a PolicyDecision with DecisionId, InvocationId, e
 
 The permission-management application independently validates Tenant existence and Agent/Model ownership using Policy-local ports/projections. Its shared-database adapter imports no owning-context aggregate or ORM row, and foreign keys remain authoritative against races. Runtime Gateway imports no Policy & Risk internals; a Policy infrastructure adapter implements the Runtime-owned decision port at composition time.
 
-Default deny materially improves runtime safety. Policy management now requires the configured management bearer credential, so an anonymous caller cannot grant ALLOW. Tenant-scoped authorization and runtime-client authentication remain unresolved. See ADR-0009 and ADR-0010.
+Default deny materially improves runtime safety. Policy management requires the configured management bearer credential and exact configured Tenant scope, so neither an anonymous caller nor a management principal outside the Tenant can grant ALLOW. Runtime-client authentication remains unresolved. See ADR-0009, ADR-0010, and ADR-0011.
 
 ### Management authentication boundary
 
-Tenant, Agent, Model, and Policy routes are management-plane APIs and share one FastAPI boundary dependency. It validates an environment-supplied bearer credential in constant time and produces a framework-independent `AuthenticatedPrincipal` containing only the stable configured principal ID and `management` kind. Missing or invalid credentials receive the same sanitized 401 Problem Details response and `WWW-Authenticate: Bearer`.
+Tenant, Agent, Model, and Policy routes are management-plane APIs and share one FastAPI authentication dependency. It validates an environment-supplied bearer credential in constant time and produces a framework-independent `AuthenticatedPrincipal` containing the stable configured principal ID, `management` kind, and a finite immutable set of manageable Tenant UUIDs. Missing or invalid credentials receive the same sanitized 401 Problem Details response and `WWW-Authenticate: Bearer`.
 
-The credential is a `SecretStr`, is unwrapped only during validation, and is never an audit identity, persistence value, response field, or logging field. Configuration fails fast if the principal ID or token is absent. This is authentication only: possession proves control of one global management credential and does not prove tenant-specific authority.
+The credential is a `SecretStr`, is unwrapped only during validation, and is never an audit identity, persistence value, response field, or logging field. Authentication proves possession; a separate framework-independent rule authorizes exact Tenant UUID membership. Empty scope grants nothing, malformed or missing scope fails startup, and no wildcard/global authority exists.
 
-Health endpoints remain public for infrastructure probes. Runtime endpoints remain separate and currently unauthenticated; the management credential is not interpreted as an Agent or runtime-client identity. Provider credentials remain server-side environment secrets. The planned security evolution is static management bearer token → authenticated principals → tenant-aware authorization → OIDC/enterprise identity integration.
+Tenant GET authorizes its path identity before loading. Agent, Model, and Permission creation/mutation authorizes the supplied Tenant before business work; retrieval authorizes the aggregate's owning Tenant before presentation. Denials reuse each resource's existing 404 response, preventing cross-Tenant enumeration. Tenant creation alone remains an authenticated provisioning exception: it creates no grant, so configuration and application restart are required before the generated Tenant can be managed.
+
+Health endpoints remain public for infrastructure probes. Runtime endpoints remain separate and currently unauthenticated; neither the management credential nor its Tenant scopes are interpreted as an Agent or runtime-client identity. Provider credentials remain server-side environment secrets. The planned security evolution is configured scopes → multiple authenticated principals → persisted Tenant grants → role semantics if justified → OIDC/enterprise identity integration.
 
 ## Dependency and transaction rules
 

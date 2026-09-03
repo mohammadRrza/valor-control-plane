@@ -8,9 +8,9 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 **Current phase: Phase 2 — Runtime Gateway (in progress).**
 
-Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; and static bearer authentication for management APIs.
+Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; static bearer authentication for management APIs; and configured Tenant-scoped management authorization.
 
-Planned: richer conditional policy, protected management APIs, human approval, tool/MCP governance, runtime routing and additional providers, evaluation, telemetry, FinOps, incident, and compliance capabilities. No bounded context, policy engine, or LLM gateway is complete.
+Planned: dynamic management grants, richer conditional policy, human approval, tool/MCP governance, runtime authentication/routing and additional providers, evaluation, telemetry, FinOps, incident, and compliance capabilities. No bounded context, policy engine, identity platform, or LLM gateway is complete.
 
 Experimental: none.
 
@@ -24,7 +24,8 @@ Prerequisites: Python 3.13, [uv](https://docs.astral.sh/uv/), and optionally Doc
 
 ```bash
 cp .env.example .env
-# Supply a stable management principal ID and a long random management token.
+# Supply a stable management principal ID, a long random token, and an explicit
+# JSON array of manageable Tenant UUIDs. An empty array grants no Tenant access.
 # Replace every example credential before any non-local use.
 uv sync --frozen
 uv run uvicorn valor.main:create_app --factory --reload
@@ -45,7 +46,7 @@ make docker-up         # API + PostgreSQL
 make docker-down
 ```
 
-The API listens on port 8000. Operational endpoints are `/health/live` and `/health/ready` and remain public. Send `Authorization: Bearer <management-token>` to every Tenant, Agent, Model, and Policy route. Runtime routes deliberately do not treat the management credential as a runtime identity. Implemented routes are:
+The API listens on port 8000. Operational endpoints are `/health/live` and `/health/ready` and remain public. Send `Authorization: Bearer <management-token>` to every Tenant, Agent, Model, and Policy route. Existing-Tenant operations also require that Tenant UUID in `VALOR_SECURITY__MANAGEMENT_TENANT_IDS`. Runtime routes deliberately do not treat the management principal or its scopes as a runtime identity. Implemented routes are:
 
 ```text
 POST /api/v1/tenants
@@ -88,7 +89,7 @@ src/valor/
     infrastructure/ PostgreSQL policy persistence/admission/runtime adapter
     presentation/   permission HTTP contracts, routes, and errors
   security/
-    application/    framework-independent authenticated management principal
+    application/    authenticated principal and explicit Tenant authorization rule
     presentation/   bearer parsing, constant-time validation, and HTTP error mapping
   infrastructure/  concrete adapters
   shared_kernel/   minimal framework-free primitives
@@ -101,7 +102,9 @@ docs/              architecture and decisions
 
 Never commit `.env`, secrets, tokens, credentials, or sensitive payloads. Logs must use allow-listed metadata and must not contain prompts or credentials. Treat migrations as reviewed production changes: provide reversible downgrades where safe and never edit an applied revision. Contributions should include proportionate tests, updated documentation, and pass every `make lint`, `make typecheck`, and `make test` check. Use Conventional Commit subjects (for example, `feat(identity): register tenant`) without adding commit tooling solely to enforce formatting.
 
-**Security status:** Tenant, Agent, Model, and Policy management endpoints require an environment-configured static bearer token. It authenticates one stable global management principal but provides no tenant-scoped authorization, individual user identity, RBAC, OIDC/SSO, or credential lifecycle. It is an interim boundary and deployments must inject it securely and use TLS. The token is not persisted, logged, or returned.
+**Security status:** Tenant, Agent, Model, and Policy management endpoints require an environment-configured static bearer token. Existing-Tenant operations additionally require an exact UUID match in the principal's finite configured Tenant scope. Empty scope authorizes no Tenant; there is no wildcard. Cross-Tenant access uses the same not-found responses as absent resources. This model provides no individual user identity, dynamic grants, memberships, RBAC, OIDC/SSO, or credential lifecycle. Deployments must inject the token securely and use TLS; it is not persisted, logged, or returned.
+
+Tenant creation is an authenticated provisioning exception because its generated UUID cannot be scoped before creation. Creation does not grant access. Add the returned UUID to `VALOR_SECURITY__MANAGEMENT_TENANT_IDS` and restart the application before retrieving the Tenant or managing its Agents, Models, and permissions. The value uses JSON-array syntax, for example `["00000000-0000-4000-8000-000000000001"]`.
 
 Runtime execution is default-deny: an explicit ALLOW for the exact Tenant/Agent/Model tuple is required before the provider can run. Anonymous callers cannot mutate that permission. Runtime-client authentication remains unresolved and is intentionally separate from management authentication; Runtime endpoints must not yet be exposed to untrusted networks.
 

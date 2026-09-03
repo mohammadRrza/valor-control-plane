@@ -73,6 +73,7 @@ def runtime_client(
         security=SecuritySettings(
             management_principal_id="test-management",
             management_token=TEST_MANAGEMENT_TOKEN,
+            management_tenant_ids=frozenset(),
         ),
     )
     with TestClient(
@@ -92,6 +93,7 @@ def unauthenticated_runtime_client(
         security=SecuritySettings(
             management_principal_id="test-management",
             management_token=TEST_MANAGEMENT_TOKEN,
+            management_tenant_ids=frozenset(),
         ),
     )
     with TestClient(create_app(settings, runtime_provider=runtime_provider)) as client:

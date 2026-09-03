@@ -20,6 +20,7 @@ def authentication_client() -> TestClient:
         security=SecuritySettings(
             management_principal_id="stable-operator",
             management_token=TOKEN,
+            management_tenant_ids=frozenset(),
         ),
     )
 
@@ -71,11 +72,11 @@ def test_missing_malformed_or_invalid_credentials_share_sanitized_failure(
 
 
 def test_principal_representation_never_contains_credential() -> None:
-    principal = AuthenticatedPrincipal("stable-operator", PrincipalKind.MANAGEMENT)
+    principal = AuthenticatedPrincipal("stable-operator", PrincipalKind.MANAGEMENT, frozenset())
     assert TOKEN not in repr(principal)
     assert not hasattr(principal, "token")
 
 
 def test_principal_identity_cannot_be_empty() -> None:
     with pytest.raises(ValueError, match="principal_id must not be empty"):
-        AuthenticatedPrincipal(" ", PrincipalKind.MANAGEMENT)
+        AuthenticatedPrincipal(" ", PrincipalKind.MANAGEMENT, frozenset())
