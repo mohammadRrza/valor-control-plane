@@ -1,11 +1,14 @@
-"""Runtime-local identities used at bounded-context boundaries."""
-
 from dataclasses import dataclass
 from uuid import UUID
 
 
 @dataclass(frozen=True, slots=True)
-class InvocationId:
+class PermissionId:
+    value: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionId:
     value: UUID
 
 
@@ -25,5 +28,5 @@ class ModelId:
 
 
 @dataclass(frozen=True, slots=True)
-class PolicyDecisionId:
+class InvocationId:
     value: UUID

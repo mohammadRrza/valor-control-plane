@@ -27,6 +27,7 @@ class InvocationResponse(BaseModel):
     output: str | None
     started_at: datetime
     completed_at: datetime
+    policy_decision_id: UUID
 
     @classmethod
     def from_domain(cls, invocation: Invocation) -> "InvocationResponse":
@@ -40,4 +41,5 @@ class InvocationResponse(BaseModel):
             output=invocation.output_text,
             started_at=invocation.started_at,
             completed_at=invocation.completed_at,
+            policy_decision_id=invocation.policy_decision_id.value,
         )

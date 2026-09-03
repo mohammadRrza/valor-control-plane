@@ -12,7 +12,7 @@ flowchart LR
   O[Platform Operators] --> V
 ```
 
-VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 established the operational shell; Phase 1 added Tenant, Agent, and governed Model reference slices. Phase 2 now has one synchronous OpenAI text-invocation path with persisted final outcomes; it is not a complete LLM gateway.
+VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 established the operational shell; Phase 1 added Tenant, Agent, and governed Model reference slices. Phase 2 has one synchronous OpenAI path, now governed by explicit default-deny Agent-to-Model permission decisions; it is neither a complete gateway nor a general policy engine.
 
 ## Current container and component view
 
@@ -31,6 +31,8 @@ flowchart TB
   APP --> RUNTIME[Runtime Gateway domain]
   INFRA -. implements runtime ports .-> RUNTIME
   INFRA --> OPENAI[OpenAI Responses API]
+  APP --> POLICY[Policy & Risk domain]
+  INFRA -. implements policy ports .-> POLICY
 ```
 
 The application is one deployable process. Operational routes are outside domain APIs. PostgreSQL is the only runtime dependency. The domain remains synchronous; async appears at I/O boundaries.
@@ -49,7 +51,7 @@ The application is one deployable process. Operational routes are outside domain
 | Incident Management | detection and response lifecycle | consumes violations, SLOs and evaluation failures |
 | Compliance & Audit | immutable decision evidence | consumes explicit integration events/contracts |
 
-These are domain boundaries, not services. Identity & Tenancy currently supports Tenant creation and retrieval. AI Asset Registry currently supports Agent and governed Model reference registration and retrieval. Runtime Gateway currently supports creation and retrieval of one synchronous text Invocation through OpenAI. Each bounded context owns its `domain`, `application`, `infrastructure`, and `presentation` layers. Domain functionality must not accumulate indefinitely in global top-level application or infrastructure packages. Cross-context access uses explicit contracts rather than imports into another context's internals.
+These are domain boundaries, not services. Identity & Tenancy supports Tenant creation/retrieval; AI Asset Registry supports Agent and Model registration/retrieval; Runtime Gateway supports one synchronous OpenAI Invocation; Policy & Risk supports one exact Agent-to-Model permission and decision history. Each context owns its architectural layers. Cross-context access uses explicit contracts rather than imports into another context's internals.
 
 ### Tenant slice decisions
 
@@ -103,9 +105,19 @@ The request supplies `ModelId` directly. Any Model belonging to the same Tenant 
 
 The OpenAI infrastructure adapter uses the current Responses API for one plain string input and reads provider-neutral `output_text`. It requests `store=false`, uses an environment-supplied credential and bounded timeout, and translates SDK/upstream failures without exposing raw details. SDK types do not cross the infrastructure boundary.
 
-Admission reads and the external provider call occur before opening the Invocation write Unit of Work. The handler constructs a final outcome, then opens a short database transaction, persists, and commits. Provider failures are recorded as final failed Invocations without output or raw exception details before a `502` response is produced. If recording itself fails, the persistence error takes precedence because VALOR cannot claim an audit record exists; no distributed transaction is attempted.
+Admission reads occur before policy evaluation. After resource ownership succeeds, Runtime Gateway creates InvocationId and asks its narrow policy-decision port. Policy & Risk atomically resolves the current permission, persists the decision, and commits before any provider call. Default or explicit DENY then creates a linked denied Invocation and returns 403 without contacting the provider. Explicit ALLOW permits provider execution, after which a short Invocation Unit of Work persists success or failure. No database transaction spans provider I/O and no distributed transaction is attempted.
 
 This first slice persists raw input and successful output for retrieval/audit value but never logs them. The runtime API is unauthenticated. Retention, redaction, classification, encryption policy, and production access controls are explicit technical debt, and the endpoints must not be exposed to untrusted networks.
+
+### Default-deny Agent-to-Model admission
+
+Policy & Risk owns one `AgentModelPermission` per Tenant/Agent/Model tuple. PUT atomically creates or replaces the current `ALLOW`/`DENY` effect while preserving PermissionId and creation time. There are no conditions, wildcards, inheritance, rule precedence, versions, assignments, RBAC/ABAC, or external policy engine.
+
+Each evaluated attempt creates a PolicyDecision with DecisionId, InvocationId, exact resource IDs, effect, timestamp, and optional PermissionId. A null PermissionId with DENY means default deny; a present PermissionId identifies explicit allow or deny. `invocations.policy_decision_id` links the runtime result back to that fact. The reverse Decision `invocation_id` is a unique indexed correlation value rather than a foreign key because the decision must commit before the provider call and before the final Invocation row exists.
+
+The permission-management application independently validates Tenant existence and Agent/Model ownership using Policy-local ports/projections. Its shared-database adapter imports no owning-context aggregate or ORM row, and foreign keys remain authoritative against races. Runtime Gateway imports no Policy & Risk internals; a Policy infrastructure adapter implements the Runtime-owned decision port at composition time.
+
+Default deny materially improves runtime safety but does not make the deployment secure: policy management itself is unauthenticated. A reachable caller can grant ALLOW, so management and runtime APIs must remain isolated from untrusted networks until authentication and authorization exist. See ADR-0009.
 
 ## Dependency and transaction rules
 

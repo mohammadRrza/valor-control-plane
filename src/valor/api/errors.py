@@ -1,5 +1,7 @@
 """Consistent HTTP error representation at the presentation boundary."""
 
+from uuid import UUID
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -12,20 +14,27 @@ class ProblemDetail(BaseModel):
     status: int
     detail: str
     instance: str | None = None
+    decision_id: UUID | None = None
 
 
 def problem_response(
-    request: Request, *, title: str, status_code: int, detail: str
+    request: Request,
+    *,
+    title: str,
+    status_code: int,
+    detail: str,
+    decision_id: UUID | None = None,
 ) -> JSONResponse:
     problem = ProblemDetail(
         title=title,
         status=status_code,
         detail=detail,
         instance=request.url.path,
+        decision_id=decision_id,
     )
     return JSONResponse(
         status_code=status_code,
-        content=problem.model_dump(exclude_none=True),
+        content=problem.model_dump(mode="json", exclude_none=True),
         media_type="application/problem+json",
     )
 

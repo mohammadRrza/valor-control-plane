@@ -14,7 +14,7 @@ class InvocationRow(SqlAlchemyBase):
     __table_args__ = (
         CheckConstraint(
             "(status = 'succeeded' AND output_text IS NOT NULL) OR "
-            "(status = 'failed' AND output_text IS NULL)",
+            "(status IN ('failed', 'denied') AND output_text IS NULL)",
             name="ck_invocations_status_output",
         ),
     )
@@ -34,3 +34,10 @@ class InvocationRow(SqlAlchemyBase):
     output_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    policy_decision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            "policy_decisions.id",
+            name="fk_invocations_policy_decision_id_policy_decisions",
+        ),
+        nullable=True,
+    )

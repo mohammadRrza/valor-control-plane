@@ -19,12 +19,35 @@ from valor.ai_asset_registry.infrastructure.unit_of_work import SqlAlchemyAgentU
 from valor.identity_tenancy.domain.tenant import Tenant
 from valor.identity_tenancy.domain.tenant import TenantId as RegistryTenantId
 from valor.identity_tenancy.infrastructure.unit_of_work import SqlAlchemyTenantUnitOfWork
+from valor.policy_risk.domain.identity import (
+    AgentId as PolicyAgentId,
+)
+from valor.policy_risk.domain.identity import (
+    DecisionId,
+)
+from valor.policy_risk.domain.identity import (
+    InvocationId as PolicyInvocationId,
+)
+from valor.policy_risk.domain.identity import (
+    ModelId as PolicyModelId,
+)
+from valor.policy_risk.domain.identity import (
+    TenantId as PolicyTenantId,
+)
+from valor.policy_risk.domain.policy import PolicyDecision, PolicyEffect
+from valor.policy_risk.infrastructure.unit_of_work import SqlAlchemyPolicyUnitOfWork
 from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
     ModelNotAvailable,
     TenantNotAvailable,
 )
-from valor.runtime_gateway.domain.identity import AgentId, InvocationId, ModelId, TenantId
+from valor.runtime_gateway.domain.identity import (
+    AgentId,
+    InvocationId,
+    ModelId,
+    PolicyDecisionId,
+    TenantId,
+)
 from valor.runtime_gateway.domain.invocation import Invocation
 from valor.runtime_gateway.infrastructure.admission import PostgresRuntimeAdmission
 from valor.runtime_gateway.infrastructure.unit_of_work import SqlAlchemyInvocationUnitOfWork
@@ -35,6 +58,8 @@ MODEL_UUID = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
 INVOCATION_ID = InvocationId(UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
 STARTED_AT = datetime(2026, 2, 3, 4, 5, 6, 678901, tzinfo=UTC)
 COMPLETED_AT = STARTED_AT + timedelta(seconds=1)
+DECISION_UUID = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+DECISION_ID = PolicyDecisionId(DECISION_UUID)
 
 
 def sessions_for(database_url: str) -> tuple[async_sessionmaker[AsyncSession], AsyncEngine]:
@@ -70,6 +95,20 @@ async def persist_runtime_references(sessions: async_sessionmaker[AsyncSession])
             )
         )
         await unit_of_work.commit()
+    async with SqlAlchemyPolicyUnitOfWork(sessions) as unit_of_work:
+        await unit_of_work.decisions.add(
+            PolicyDecision(
+                DecisionId(DECISION_UUID),
+                PolicyInvocationId(INVOCATION_ID.value),
+                PolicyTenantId(TENANT_UUID),
+                PolicyAgentId(AGENT_UUID),
+                PolicyModelId(MODEL_UUID),
+                None,
+                PolicyEffect.ALLOW,
+                STARTED_AT,
+            )
+        )
+        await unit_of_work.commit()
 
 
 def succeeded_invocation(
@@ -87,6 +126,7 @@ def succeeded_invocation(
         "output",
         STARTED_AT,
         COMPLETED_AT,
+        DECISION_ID,
     )
 
 
@@ -119,6 +159,7 @@ async def test_failed_invocation_persists_without_output(runtime_database_url: s
         "input",
         STARTED_AT,
         COMPLETED_AT,
+        DECISION_ID,
     )
     async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
         await unit_of_work.invocations.add(expected)

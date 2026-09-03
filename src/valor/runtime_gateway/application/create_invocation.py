@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
+    InvocationDenied,
     ModelNotAvailable,
     ProviderInvocationFailed,
     ProviderNotSupportedForRuntime,
@@ -17,6 +18,7 @@ from valor.runtime_gateway.application.ports import (
     ModelProviderPort,
     ModelRuntimeLookupPort,
     ProviderTransportError,
+    RuntimePolicyDecisionPort,
     TenantRuntimeLookupPort,
 )
 from valor.runtime_gateway.application.unit_of_work import InvocationUnitOfWork
@@ -44,6 +46,7 @@ class CreateInvocationHandler:
         agents: AgentRuntimeLookupPort,
         models: ModelRuntimeLookupPort,
         openai_provider: ModelProviderPort,
+        policy: RuntimePolicyDecisionPort,
         *,
         id_factory: Callable[[], UUID] = uuid4,
         clock: Callable[[], datetime] = utc_now,
@@ -53,6 +56,7 @@ class CreateInvocationHandler:
         self._agents = agents
         self._models = models
         self._openai_provider = openai_provider
+        self._policy = policy
         self._id_factory = id_factory
         self._clock = clock
 
@@ -71,6 +75,25 @@ class CreateInvocationHandler:
 
         invocation_id = InvocationId(self._id_factory())
         started_at = self._clock()
+        decision = await self._policy.decide(
+            invocation_id=invocation_id,
+            tenant_id=command.tenant_id,
+            agent_id=command.agent_id,
+            model_id=command.model_id,
+        )
+        if decision.effect != "allow":
+            denied = Invocation.denied(
+                invocation_id,
+                command.tenant_id,
+                command.agent_id,
+                command.model_id,
+                input_text,
+                started_at,
+                self._clock(),
+                decision.id,
+            )
+            await self._persist(denied)
+            raise InvocationDenied(invocation_id, decision.id)
         try:
             result = await self._openai_provider.invoke(
                 model_reference=model.provider_model_reference,
@@ -85,6 +108,7 @@ class CreateInvocationHandler:
                 input_text,
                 started_at,
                 self._clock(),
+                decision.id,
             )
             await self._persist(failed)
             raise ProviderInvocationFailed(invocation_id) from None
@@ -98,6 +122,7 @@ class CreateInvocationHandler:
             result.output_text,
             started_at,
             self._clock(),
+            decision.id,
         )
         await self._persist(succeeded)
         return succeeded

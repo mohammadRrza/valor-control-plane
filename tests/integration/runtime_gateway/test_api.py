@@ -1,3 +1,4 @@
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -58,6 +59,22 @@ def invocation_payload(tenant_id: UUID, agent_id: UUID, model_id: UUID) -> dict[
     }
 
 
+def set_permission(
+    client: TestClient, tenant_id: UUID, agent_id: UUID, model_id: UUID, effect: str
+) -> dict[str, object]:
+    response = client.put(
+        "/api/v1/policies/agent-model-permissions",
+        json={
+            "tenant_id": str(tenant_id),
+            "agent_id": str(agent_id),
+            "model_id": str(model_id),
+            "effect": effect,
+        },
+    )
+    assert response.status_code == 200, response.text
+    return cast(dict[str, object], response.json())
+
+
 def assert_problem(response_status: int, content_type: str, body: dict[str, object]) -> None:
     assert body.keys() >= {"type", "title", "status", "detail", "instance"}
     assert body["status"] == response_status
@@ -70,6 +87,7 @@ def test_create_then_get_invocation_with_deterministic_provider(
     runtime_provider: DeterministicRuntimeProvider,
 ) -> None:
     tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
     created = runtime_client.post(
         "/api/v1/runtime/invocations",
         json=invocation_payload(tenant_id, agent_id, model_id),
@@ -84,6 +102,54 @@ def test_create_then_get_invocation_with_deterministic_provider(
     retrieved = runtime_client.get(f"/api/v1/runtime/invocations/{body['invocation_id']}")
     assert retrieved.status_code == 200
     assert retrieved.json() == body
+    assert body["policy_decision_id"]
+
+
+@pytest.mark.integration
+def test_permission_put_replaces_effect_and_preserves_identity(runtime_client: TestClient) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    allowed = set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
+    denied = set_permission(runtime_client, tenant_id, agent_id, model_id, "deny")
+    assert denied["id"] == allowed["id"]
+    assert denied["created_at"] == allowed["created_at"]
+    assert denied["effect"] == "deny"
+    response = runtime_client.get(f"/api/v1/policies/agent-model-permissions/{allowed['id']}")
+    assert response.status_code == 200
+    assert response.json() == denied
+
+
+@pytest.mark.integration
+def test_cross_tenant_permission_definition_is_hidden(runtime_client: TestClient) -> None:
+    tenant_id, agent_id, _ = runtime_references(runtime_client)
+    other_tenant = create_tenant(runtime_client, "Runtime Globex")
+    other_model = create_model(runtime_client, other_tenant, "Other Model")
+    response = runtime_client.put(
+        "/api/v1/policies/agent-model-permissions",
+        json={
+            "tenant_id": str(tenant_id),
+            "agent_id": str(agent_id),
+            "model_id": str(other_model),
+            "effect": "allow",
+        },
+    )
+    assert response.status_code == 404
+    assert response.json()["title"] == "Policy Resource Not Found"
+
+
+@pytest.mark.integration
+def test_malformed_permission_effect_is_rejected(runtime_client: TestClient) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    response = runtime_client.put(
+        "/api/v1/policies/agent-model-permissions",
+        json={
+            "tenant_id": str(tenant_id),
+            "agent_id": str(agent_id),
+            "model_id": str(model_id),
+            "effect": "maybe",
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["title"] == "Request Validation Failed"
 
 
 @pytest.mark.integration
@@ -118,6 +184,7 @@ def test_missing_runtime_reference_returns_non_disclosing_not_found(
     runtime_client: TestClient, missing: str
 ) -> None:
     tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
     values = {"tenant": tenant_id, "agent": agent_id, "model": model_id}
     values[missing] = uuid4()
     response = runtime_client.post(
@@ -151,6 +218,7 @@ async def test_provider_failure_returns_bad_gateway_and_persists_failed_invocati
     runtime_database_url: str,
 ) -> None:
     tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
     runtime_provider.fails = True
     response = runtime_client.post(
         "/api/v1/runtime/invocations",
@@ -166,8 +234,11 @@ async def test_provider_failure_returns_bad_gateway_and_persists_failed_invocati
         row = (
             await connection.execute(
                 text(
-                    "SELECT status, output_text, input_text FROM invocations "
-                    "WHERE tenant_id = :tenant_id"
+                    "SELECT i.status, i.output_text, i.input_text, d.effect, "
+                    "i.policy_decision_id = d.id AS linked "
+                    "FROM invocations i JOIN policy_decisions d "
+                    "ON d.invocation_id = i.id "
+                    "WHERE i.tenant_id = :tenant_id"
                 ),
                 {"tenant_id": tenant_id},
             )
@@ -175,6 +246,46 @@ async def test_provider_failure_returns_bad_gateway_and_persists_failed_invocati
     assert row.status == "failed"
     assert row.output_text is None
     assert row.input_text == "Explain zero trust."
+    assert row.effect == "allow"
+    assert row.linked is True
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.asyncio
+async def test_default_and_explicit_deny_never_call_provider(
+    runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+    runtime_database_url: str,
+    explicit: bool,
+) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    if explicit:
+        set_permission(runtime_client, tenant_id, agent_id, model_id, "deny")
+    response = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(tenant_id, agent_id, model_id),
+    )
+    assert response.status_code == 403
+    assert response.json()["title"] == "Invocation Denied"
+    assert "decision_id" in response.json()
+    assert runtime_provider.calls == []
+    engine = create_async_engine(runtime_database_url)
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT i.status, i.policy_decision_id = d.id AS linked, "
+                    "d.permission_id FROM invocations i JOIN policy_decisions d "
+                    "ON d.invocation_id = i.id WHERE i.tenant_id = :tenant_id"
+                ),
+                {"tenant_id": tenant_id},
+            )
+        ).one()
+    assert row.status == "denied"
+    assert row.linked is True
+    assert (row.permission_id is not None) is explicit
     await engine.dispose()
 
 

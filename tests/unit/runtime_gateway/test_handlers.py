@@ -11,6 +11,7 @@ from valor.runtime_gateway.application.create_invocation import (
 )
 from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
+    InvocationDenied,
     InvocationNotFound,
     ModelNotAvailable,
     ProviderInvocationFailed,
@@ -26,8 +27,15 @@ from valor.runtime_gateway.application.ports import (
     ModelRuntimeReference,
     ProviderInvocationResult,
     ProviderTransportError,
+    RuntimePolicyDecision,
 )
-from valor.runtime_gateway.domain.identity import AgentId, InvocationId, ModelId, TenantId
+from valor.runtime_gateway.domain.identity import (
+    AgentId,
+    InvocationId,
+    ModelId,
+    PolicyDecisionId,
+    TenantId,
+)
 from valor.runtime_gateway.domain.invocation import Invocation, InvocationStatus
 
 INVOCATION_UUID = UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
@@ -37,6 +45,7 @@ AGENT_ID = AgentId(UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
 MODEL_ID = ModelId(UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
 STARTED_AT = datetime(2026, 2, 3, 4, 5, tzinfo=UTC)
 COMPLETED_AT = STARTED_AT + timedelta(seconds=1)
+DECISION_ID = PolicyDecisionId(UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
 
 
 class InMemoryInvocationRepository:
@@ -122,10 +131,29 @@ class ProviderStub:
         return ProviderInvocationResult("deterministic output")
 
 
+class PolicyStub:
+    def __init__(self, effect: str = "allow") -> None:
+        self.effect = effect
+        self.calls = 0
+
+    async def decide(
+        self,
+        *,
+        invocation_id: InvocationId,
+        tenant_id: TenantId,
+        agent_id: AgentId,
+        model_id: ModelId,
+    ) -> RuntimePolicyDecision:
+        del invocation_id, tenant_id, agent_id, model_id
+        self.calls += 1
+        return RuntimePolicyDecision(DECISION_ID, self.effect, None)
+
+
 def handler(
     unit_of_work: RecordingInvocationUnitOfWork,
     admission: AdmissionStub,
     provider: ProviderStub,
+    policy: PolicyStub | None = None,
 ) -> CreateInvocationHandler:
     times = iter((STARTED_AT, COMPLETED_AT))
     return CreateInvocationHandler(
@@ -134,6 +162,7 @@ def handler(
         admission,
         admission,
         provider,
+        policy or PolicyStub(),
         id_factory=lambda: INVOCATION_UUID,
         clock=lambda: next(times),
     )
@@ -238,12 +267,29 @@ async def test_get_invocation_returns_record_without_commit() -> None:
         "input",
         STARTED_AT,
         COMPLETED_AT,
+        DECISION_ID,
     )
     await repository.add(invocation)
     unit_of_work = RecordingInvocationUnitOfWork(repository)
     result = await GetInvocationHandler(unit_of_work)(GetInvocationQuery(invocation.id))
     assert result == invocation
     assert unit_of_work.commits == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effect", ["deny", "default-deny"])
+async def test_policy_deny_records_denied_invocation_without_provider(effect: str) -> None:
+    unit_of_work = RecordingInvocationUnitOfWork()
+    provider = ProviderStub()
+    policy = PolicyStub(effect)
+    with pytest.raises(InvocationDenied) as error:
+        await handler(unit_of_work, AdmissionStub(), provider, policy)(command())
+    invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
+    assert invocation.status is InvocationStatus.DENIED
+    assert invocation.policy_decision_id == DECISION_ID
+    assert error.value.decision_id == DECISION_ID
+    assert provider.calls == []
+    assert unit_of_work.commits == 1
 
 
 @pytest.mark.asyncio

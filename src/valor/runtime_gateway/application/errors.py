@@ -1,6 +1,12 @@
 """Protocol-independent Runtime Gateway application failures."""
 
-from valor.runtime_gateway.domain.identity import AgentId, InvocationId, ModelId, TenantId
+from valor.runtime_gateway.domain.identity import (
+    AgentId,
+    InvocationId,
+    ModelId,
+    PolicyDecisionId,
+    TenantId,
+)
 
 
 class TenantNotAvailable(Exception):
@@ -37,3 +43,9 @@ class InvocationNotFound(Exception):
     def __init__(self, invocation_id: InvocationId) -> None:
         super().__init__(f"Invocation {invocation_id.value} was not found.")
         self.invocation_id = invocation_id
+
+
+class InvocationDenied(Exception):
+    def __init__(self, invocation_id: InvocationId, decision_id: PolicyDecisionId) -> None:
+        self.invocation_id = invocation_id
+        self.decision_id = decision_id

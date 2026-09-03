@@ -23,12 +23,16 @@ async def clean_tenants(tenant_database_url: str) -> AsyncIterator[None]:
     engine = create_async_engine(tenant_database_url)
     async with engine.begin() as connection:
         await connection.execute(text("DELETE FROM invocations"))
+        await connection.execute(text("DELETE FROM policy_decisions"))
+        await connection.execute(text("DELETE FROM agent_model_permissions"))
         await connection.execute(text("DELETE FROM models"))
         await connection.execute(text("DELETE FROM agents"))
         await connection.execute(text("DELETE FROM tenants"))
     yield
     async with engine.begin() as connection:
         await connection.execute(text("DELETE FROM invocations"))
+        await connection.execute(text("DELETE FROM policy_decisions"))
+        await connection.execute(text("DELETE FROM agent_model_permissions"))
         await connection.execute(text("DELETE FROM models"))
         await connection.execute(text("DELETE FROM agents"))
         await connection.execute(text("DELETE FROM tenants"))

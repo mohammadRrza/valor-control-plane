@@ -5,7 +5,13 @@ from datetime import datetime
 from enum import StrEnum
 
 from valor.runtime_gateway.domain.errors import InvalidInvocationInput, InvalidInvocationOutput
-from valor.runtime_gateway.domain.identity import AgentId, InvocationId, ModelId, TenantId
+from valor.runtime_gateway.domain.identity import (
+    AgentId,
+    InvocationId,
+    ModelId,
+    PolicyDecisionId,
+    TenantId,
+)
 
 MAX_INVOCATION_INPUT_LENGTH = 10_000
 
@@ -13,6 +19,7 @@ MAX_INVOCATION_INPUT_LENGTH = 10_000
 class InvocationStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    DENIED = "denied"
 
 
 def validated_input(value: str) -> str:
@@ -37,6 +44,7 @@ class Invocation:
     output_text: str | None
     started_at: datetime
     completed_at: datetime
+    policy_decision_id: PolicyDecisionId
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "input_text", validated_input(self.input_text))
@@ -49,7 +57,7 @@ class Invocation:
             if self.output_text is None or not self.output_text.strip():
                 raise InvalidInvocationOutput("A succeeded Invocation requires text output.")
         elif self.output_text is not None:
-            raise InvalidInvocationOutput("A failed Invocation must not retain provider output.")
+            raise InvalidInvocationOutput("A failed or denied Invocation must not retain output.")
 
     @classmethod
     def succeeded(
@@ -62,6 +70,7 @@ class Invocation:
         output_text: str,
         started_at: datetime,
         completed_at: datetime,
+        policy_decision_id: PolicyDecisionId,
     ) -> "Invocation":
         return cls(
             invocation_id,
@@ -73,6 +82,7 @@ class Invocation:
             output_text,
             started_at,
             completed_at,
+            policy_decision_id,
         )
 
     @classmethod
@@ -85,6 +95,7 @@ class Invocation:
         input_text: str,
         started_at: datetime,
         completed_at: datetime,
+        policy_decision_id: PolicyDecisionId,
     ) -> "Invocation":
         return cls(
             invocation_id,
@@ -96,4 +107,30 @@ class Invocation:
             None,
             started_at,
             completed_at,
+            policy_decision_id,
+        )
+
+    @classmethod
+    def denied(
+        cls,
+        invocation_id: InvocationId,
+        tenant_id: TenantId,
+        agent_id: AgentId,
+        model_id: ModelId,
+        input_text: str,
+        started_at: datetime,
+        completed_at: datetime,
+        policy_decision_id: PolicyDecisionId,
+    ) -> "Invocation":
+        return cls(
+            invocation_id,
+            tenant_id,
+            agent_id,
+            model_id,
+            InvocationStatus.DENIED,
+            input_text,
+            None,
+            started_at,
+            completed_at,
+            policy_decision_id,
         )

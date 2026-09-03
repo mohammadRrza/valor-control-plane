@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from valor.api.errors import problem_response
 from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
+    InvocationDenied,
     InvocationNotFound,
     ModelNotAvailable,
     ProviderInvocationFailed,
@@ -78,4 +79,14 @@ def install_runtime_gateway_error_handlers(app: FastAPI) -> None:
             title="Invocation Not Found",
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The requested Invocation was not found.",
+        )
+
+    @app.exception_handler(InvocationDenied)
+    async def invocation_denied(request: Request, exc: InvocationDenied) -> JSONResponse:
+        return problem_response(
+            request,
+            title="Invocation Denied",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The requested invocation is not permitted.",
+            decision_id=exc.decision_id.value,
         )

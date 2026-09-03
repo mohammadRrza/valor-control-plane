@@ -37,3 +37,21 @@ def test_runtime_gateway_core_does_not_import_owning_context_internals() -> None
                         f"{path.relative_to(SOURCE)}:{line} imports {imported_module}"
                     )
     assert not violations, "Cross-context internal imports:\n" + "\n".join(violations)
+
+
+def test_policy_risk_core_does_not_import_other_context_internals() -> None:
+    context = SOURCE / "valor" / "policy_risk"
+    forbidden = (
+        "valor.ai_asset_registry",
+        "valor.identity_tenancy",
+        "valor.runtime_gateway",
+    )
+    violations: list[str] = []
+    for layer in ("domain", "application"):
+        for path in (context / layer).rglob("*.py"):
+            for imported_module, line in imports_in(SOURCE, path):
+                if imported_module.startswith(forbidden):
+                    violations.append(
+                        f"{path.relative_to(SOURCE)}:{line} imports {imported_module}"
+                    )
+    assert not violations, "Cross-context internal imports:\n" + "\n".join(violations)

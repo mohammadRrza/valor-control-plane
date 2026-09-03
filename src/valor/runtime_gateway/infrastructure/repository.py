@@ -10,7 +10,13 @@ from valor.runtime_gateway.application.errors import (
     ModelNotAvailable,
     TenantNotAvailable,
 )
-from valor.runtime_gateway.domain.identity import AgentId, InvocationId, ModelId, TenantId
+from valor.runtime_gateway.domain.identity import (
+    AgentId,
+    InvocationId,
+    ModelId,
+    PolicyDecisionId,
+    TenantId,
+)
 from valor.runtime_gateway.domain.invocation import Invocation, InvocationStatus
 from valor.runtime_gateway.infrastructure.models import InvocationRow
 
@@ -35,6 +41,7 @@ class SqlAlchemyInvocationRepository:
                 output_text=invocation.output_text,
                 started_at=invocation.started_at,
                 completed_at=invocation.completed_at,
+                policy_decision_id=invocation.policy_decision_id.value,
             )
         )
         try:
@@ -56,6 +63,8 @@ class SqlAlchemyInvocationRepository:
         )
         if row is None:
             return None
+        if row.policy_decision_id is None:
+            raise RuntimeError("Legacy Invocation has no policy decision link")
         return Invocation(
             InvocationId(row.id),
             TenantId(row.tenant_id),
@@ -66,4 +75,5 @@ class SqlAlchemyInvocationRepository:
             row.output_text,
             row.started_at,
             row.completed_at,
+            PolicyDecisionId(row.policy_decision_id),
         )

@@ -2,8 +2,15 @@
 
 from dataclasses import dataclass
 from typing import Protocol
+from uuid import UUID
 
-from valor.runtime_gateway.domain.identity import AgentId, ModelId, TenantId
+from valor.runtime_gateway.domain.identity import (
+    AgentId,
+    InvocationId,
+    ModelId,
+    PolicyDecisionId,
+    TenantId,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +32,13 @@ class ProviderInvocationResult:
     output_text: str
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimePolicyDecision:
+    id: PolicyDecisionId
+    effect: str
+    permission_id: UUID | None
+
+
 class TenantRuntimeLookupPort(Protocol):
     async def exists(self, tenant_id: TenantId) -> bool: ...
 
@@ -41,6 +55,17 @@ class ModelProviderPort(Protocol):
     async def invoke(
         self, *, model_reference: str, input_text: str
     ) -> ProviderInvocationResult: ...
+
+
+class RuntimePolicyDecisionPort(Protocol):
+    async def decide(
+        self,
+        *,
+        invocation_id: InvocationId,
+        tenant_id: TenantId,
+        agent_id: AgentId,
+        model_id: ModelId,
+    ) -> RuntimePolicyDecision: ...
 
 
 class ProviderTransportError(Exception):

@@ -18,6 +18,7 @@ from valor.runtime_gateway.application.ports import (
     AgentRuntimeLookupPort,
     ModelProviderPort,
     ModelRuntimeLookupPort,
+    RuntimePolicyDecisionPort,
     TenantRuntimeLookupPort,
 )
 from valor.runtime_gateway.application.unit_of_work import InvocationUnitOfWork
@@ -52,6 +53,10 @@ def runtime_provider(request: Request) -> ModelProviderPort:
     return cast(ModelProviderPort, request.app.state.runtime_provider)
 
 
+def runtime_policy(request: Request) -> RuntimePolicyDecisionPort:
+    return cast(RuntimePolicyDecisionPort, request.app.state.runtime_policy)
+
+
 router = APIRouter(prefix="/runtime/invocations", tags=["runtime"])
 
 
@@ -65,9 +70,12 @@ async def create_invocation(
         Depends(runtime_admission),
     ],
     provider: Annotated[ModelProviderPort, Depends(runtime_provider)],
+    policy: Annotated[RuntimePolicyDecisionPort, Depends(runtime_policy)],
 ) -> InvocationResponse:
     tenants, agents, models = admission
-    invocation = await CreateInvocationHandler(unit_of_work, tenants, agents, models, provider)(
+    invocation = await CreateInvocationHandler(
+        unit_of_work, tenants, agents, models, provider, policy
+    )(
         CreateInvocationCommand(
             TenantId(payload.tenant_id),
             AgentId(payload.agent_id),
