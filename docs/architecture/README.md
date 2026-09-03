@@ -59,7 +59,8 @@ These are domain boundaries, not services. Identity & Tenancy supports Tenant cr
 
 Tenant identity is an application-generated UUID and does not depend on persistence. A tenant name is trimmed, internal whitespace is collapsed, and the canonical value is limited to 100 characters. Names are globally unique for this slice under a case-folded canonical comparison; PostgreSQL enforces the normalized key so concurrent requests cannot bypass uniqueness. This global rule can be revisited only if a future, explicit tenancy hierarchy changes the domain meaning.
 
-The implemented endpoints have no authentication or authorization. They are an architecture proof and must not be exposed to untrusted networks.
+Tenant management is authenticated and Tenant-scoped. Runtime identity is separately authenticated
+through configuration-backed workload principals; neither boundary is production-complete IAM.
 
 ### Agent registry and tenant boundary
 
@@ -71,7 +72,7 @@ flowchart LR
   I -. future reference only .-> P[Policies / evaluations / telemetry]
 ```
 
-An AI Asset Registry Agent is a governed workload identity known to VALOR. It contains no executable agent code, model configuration, prompts, tools, credentials, or runtime behavior. Future Runtime Gateway requests may reference `tenant_id` and `agent_id`; the registry does not execute them.
+An AI Asset Registry Agent is a governed workload identity known to VALOR. It contains no executable agent code, model configuration, prompts, tools, credentials, or runtime behavior. A configured Runtime Principal binds one credential identity to its Tenant and Agent IDs; the registry still does not execute Agents or own credentials.
 
 AI Asset Registry represents ownership with its local `OwningTenantId` value object. Its application layer asks only `TenantExistencePort.exists()`. The PostgreSQL adapter reads the published persistence identity `tenants.id` without importing the Tenant aggregate, repository, or ORM model. Registration checks existence for a clear error before opening the Agent write Unit of Work. The `agents.tenant_id` foreign key remains authoritative if state changes between the check and flush; that violation maps to the same `OwningTenantNotFound` application failure.
 
@@ -103,13 +104,17 @@ An Invocation is a VALOR-owned UUID plus Tenant, Agent, and Model IDs, final `su
 
 Runtime admission uses local identity/projection types and three narrow application ports. A PostgreSQL adapter queries only the published fields required from `tenants`, `agents`, and `models`; Runtime Gateway domain/application code imports no owning-context aggregates, repositories, ORM rows, or infrastructure. This is deliberate shared-schema coupling in the modular monolith. PostgreSQL foreign keys from `invocations` to all three records provide final referential protection without ORM relationships.
 
-The request supplies `ModelId` directly. Any Model belonging to the same Tenant is currently admissible; no Agent-to-Model assignment or implicit default has been invented. Missing resources and cross-tenant ownership mismatches use the same non-disclosing HTTP response. Only the `openai` provider is executable; other registered providers remain valid governance records but runtime rejects them explicitly.
+The POST request supplies only `ModelId` and input. Tenant and Agent identities come exclusively from the authenticated Runtime Principal, eliminating caller-controlled identity claims. Any Model belonging to that Tenant reaches policy evaluation; missing resources and cross-Tenant ownership mismatches use the same non-disclosing response. Only the `openai` provider is executable.
 
 The OpenAI infrastructure adapter uses the current Responses API for one plain string input and reads provider-neutral `output_text`. It requests `store=false`, uses an environment-supplied credential and bounded timeout, and translates SDK/upstream failures without exposing raw details. SDK types do not cross the infrastructure boundary.
 
 Admission reads occur before policy evaluation. After resource ownership succeeds, Runtime Gateway creates InvocationId and asks its narrow policy-decision port. Policy & Risk atomically resolves the current permission, persists the decision, and commits before any provider call. Default or explicit DENY then creates a linked denied Invocation and returns 403 without contacting the provider. Explicit ALLOW permits provider execution, after which a short Invocation Unit of Work persists success or failure. No database transaction spans provider I/O and no distributed transaction is attempted.
 
-This first slice persists raw input and successful output for retrieval/audit value but never logs them. The runtime API is unauthenticated. Retention, redaction, classification, encryption policy, and production access controls are explicit technical debt, and the endpoints must not be exposed to untrusted networks.
+Invocation persistence records the non-secret runtime principal ID in addition to Tenant and Agent,
+but never stores the credential. GET requires all three identities to match and returns 404 for
+cross-principal access. Legacy rows without authenticated principal evidence are not returned.
+Input and successful output remain persisted but never logged; retention, redaction,
+classification, encryption policy, credential lifecycle, and rate controls remain technical debt.
 
 ### Default-deny Agent-to-Model admission
 
@@ -119,7 +124,7 @@ Each evaluated attempt creates a PolicyDecision with DecisionId, InvocationId, e
 
 The permission-management application independently validates Tenant existence and Agent/Model ownership using Policy-local ports/projections. Its shared-database adapter imports no owning-context aggregate or ORM row, and foreign keys remain authoritative against races. Runtime Gateway imports no Policy & Risk internals; a Policy infrastructure adapter implements the Runtime-owned decision port at composition time.
 
-Default deny materially improves runtime safety. Policy management requires the configured management bearer credential and exact configured Tenant scope, so neither an anonymous caller nor a management principal outside the Tenant can grant ALLOW. Runtime-client authentication remains unresolved. See ADR-0009, ADR-0010, and ADR-0011.
+Default deny materially improves runtime safety. Policy management requires the management credential and exact Tenant scope. Runtime execution separately requires a credential bound to the Tenant and Agent before policy evaluation. See ADR-0009 through ADR-0012.
 
 ### Management authentication boundary
 
@@ -129,7 +134,11 @@ The credential is a `SecretStr`, is unwrapped only during validation, and is nev
 
 Tenant GET authorizes its path identity before loading. Agent, Model, and Permission creation/mutation authorizes the supplied Tenant before business work; retrieval authorizes the aggregate's owning Tenant before presentation. Denials reuse each resource's existing 404 response, preventing cross-Tenant enumeration. Tenant creation alone remains an authenticated provisioning exception: it creates no grant, so configuration and application restart are required before the generated Tenant can be managed.
 
-Health endpoints remain public for infrastructure probes. Runtime endpoints remain separate and currently unauthenticated; neither the management credential nor its Tenant scopes are interpreted as an Agent or runtime-client identity. Provider credentials remain server-side environment secrets. The planned security evolution is configured scopes → multiple authenticated principals → persisted Tenant grants → role semantics if justified → OIDC/enterprise identity integration.
+Health endpoints remain public. Runtime endpoints use a separate bearer dependency and never
+interpret the management credential as Agent identity; runtime credentials likewise fail
+management authentication. Static principals are configured only after generated Agent IDs exist.
+Future evolution may add managed issuance/rotation/revocation and workload identity or mTLS when
+deployment requirements justify them.
 
 ## Dependency and transaction rules
 

@@ -41,3 +41,4 @@ class InvocationRow(SqlAlchemyBase):
         ),
         nullable=True,
     )
+    runtime_principal_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

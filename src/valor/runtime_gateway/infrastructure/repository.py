@@ -42,6 +42,7 @@ class SqlAlchemyInvocationRepository:
                 started_at=invocation.started_at,
                 completed_at=invocation.completed_at,
                 policy_decision_id=invocation.policy_decision_id.value,
+                runtime_principal_id=invocation.runtime_principal_id,
             )
         )
         try:
@@ -63,8 +64,8 @@ class SqlAlchemyInvocationRepository:
         )
         if row is None:
             return None
-        if row.policy_decision_id is None:
-            raise RuntimeError("Legacy Invocation has no policy decision link")
+        if row.policy_decision_id is None or row.runtime_principal_id is None:
+            return None
         return Invocation(
             InvocationId(row.id),
             TenantId(row.tenant_id),
@@ -76,4 +77,5 @@ class SqlAlchemyInvocationRepository:
             row.started_at,
             row.completed_at,
             PolicyDecisionId(row.policy_decision_id),
+            row.runtime_principal_id,
         )

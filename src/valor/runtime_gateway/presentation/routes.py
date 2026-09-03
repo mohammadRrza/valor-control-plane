@@ -10,6 +10,7 @@ from valor.runtime_gateway.application.create_invocation import (
     CreateInvocationCommand,
     CreateInvocationHandler,
 )
+from valor.runtime_gateway.application.errors import InvocationNotFound
 from valor.runtime_gateway.application.get_invocation import (
     GetInvocationHandler,
     GetInvocationQuery,
@@ -27,6 +28,8 @@ from valor.runtime_gateway.presentation.schemas import (
     CreateInvocationRequest,
     InvocationResponse,
 )
+from valor.security.application.runtime_principal import RuntimePrincipal
+from valor.security.presentation.runtime_authentication import require_runtime_principal
 
 InvocationUnitOfWorkFactory = Callable[[], InvocationUnitOfWork]
 
@@ -71,14 +74,16 @@ async def create_invocation(
     ],
     provider: Annotated[ModelProviderPort, Depends(runtime_provider)],
     policy: Annotated[RuntimePolicyDecisionPort, Depends(runtime_policy)],
+    principal: Annotated[RuntimePrincipal, Depends(require_runtime_principal)],
 ) -> InvocationResponse:
     tenants, agents, models = admission
     invocation = await CreateInvocationHandler(
         unit_of_work, tenants, agents, models, provider, policy
     )(
         CreateInvocationCommand(
-            TenantId(payload.tenant_id),
-            AgentId(payload.agent_id),
+            principal.principal_id,
+            TenantId(principal.tenant_id),
+            AgentId(principal.agent_id),
             ModelId(payload.model_id),
             payload.input,
         )
@@ -91,8 +96,15 @@ async def create_invocation(
 async def get_invocation(
     invocation_id: UUID,
     unit_of_work: Annotated[InvocationUnitOfWork, Depends(invocation_unit_of_work)],
+    principal: Annotated[RuntimePrincipal, Depends(require_runtime_principal)],
 ) -> InvocationResponse:
     invocation = await GetInvocationHandler(unit_of_work)(
         GetInvocationQuery(InvocationId(invocation_id))
     )
+    if (
+        invocation.runtime_principal_id != principal.principal_id
+        or invocation.tenant_id.value != principal.tenant_id
+        or invocation.agent_id.value != principal.agent_id
+    ):
+        raise InvocationNotFound(InvocationId(invocation_id))
     return InvocationResponse.from_domain(invocation)

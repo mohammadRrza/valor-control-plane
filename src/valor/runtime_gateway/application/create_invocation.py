@@ -32,6 +32,7 @@ def utc_now() -> datetime:
 
 @dataclass(frozen=True, slots=True)
 class CreateInvocationCommand:
+    runtime_principal_id: str
     tenant_id: TenantId
     agent_id: AgentId
     model_id: ModelId
@@ -91,6 +92,7 @@ class CreateInvocationHandler:
                 started_at,
                 self._clock(),
                 decision.id,
+                command.runtime_principal_id,
             )
             await self._persist(denied)
             raise InvocationDenied(invocation_id, decision.id)
@@ -109,6 +111,7 @@ class CreateInvocationHandler:
                 started_at,
                 self._clock(),
                 decision.id,
+                command.runtime_principal_id,
             )
             await self._persist(failed)
             raise ProviderInvocationFailed(invocation_id) from None
@@ -123,6 +126,7 @@ class CreateInvocationHandler:
             started_at,
             self._clock(),
             decision.id,
+            command.runtime_principal_id,
         )
         await self._persist(succeeded)
         return succeeded

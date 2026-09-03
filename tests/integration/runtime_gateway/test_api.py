@@ -11,6 +11,35 @@ from tests.integration.runtime_gateway.conftest import (
     TEST_MANAGEMENT_TOKEN,
     DeterministicRuntimeProvider,
 )
+from valor.bootstrap.settings import RuntimeAuthenticationSettings, RuntimePrincipalSettings
+
+
+def runtime_token(agent_id: UUID) -> str:
+    return f"test-runtime-credential-{agent_id}"
+
+
+def configure_runtime_principal(
+    client: TestClient,
+    tenant_id: UUID,
+    agent_id: UUID,
+    *,
+    principal_id: str | None = None,
+) -> None:
+    app = cast(FastAPI, client.app)
+    current = app.state.settings.runtime_auth.principals
+    configured = RuntimePrincipalSettings(
+        principal_id=principal_id or f"runtime-{agent_id}",
+        tenant_id=tenant_id,
+        agent_id=agent_id,
+        credential=runtime_token(agent_id),
+    )
+    app.state.settings.runtime_auth = RuntimeAuthenticationSettings(
+        principals=(*current, configured)
+    )
+
+
+def runtime_headers(agent_id: UUID) -> dict[str, str]:
+    return {"Authorization": f"Bearer {runtime_token(agent_id)}"}
 
 
 def create_tenant(client: TestClient, name: str) -> UUID:
@@ -25,7 +54,9 @@ def create_tenant(client: TestClient, name: str) -> UUID:
 def create_agent(client: TestClient, tenant_id: UUID, name: str) -> UUID:
     response = client.post("/api/v1/agents", json={"tenant_id": str(tenant_id), "name": name})
     assert response.status_code == 201
-    return UUID(response.json()["id"])
+    agent_id = UUID(response.json()["id"])
+    configure_runtime_principal(client, tenant_id, agent_id)
+    return agent_id
 
 
 def create_model(
@@ -57,10 +88,8 @@ def runtime_references(client: TestClient) -> tuple[UUID, UUID, UUID]:
     )
 
 
-def invocation_payload(tenant_id: UUID, agent_id: UUID, model_id: UUID) -> dict[str, str]:
+def invocation_payload(model_id: UUID) -> dict[str, str]:
     return {
-        "tenant_id": str(tenant_id),
-        "agent_id": str(agent_id),
         "model_id": str(model_id),
         "input": "Explain zero trust.",
     }
@@ -86,6 +115,119 @@ def assert_problem(response_status: int, content_type: str, body: dict[str, obje
     assert body.keys() >= {"type", "title", "status", "detail", "instance"}
     assert body["status"] == response_status
     assert content_type.startswith("application/problem+json")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("method", ["post", "get"])
+def test_runtime_api_rejects_missing_invalid_and_management_credentials(
+    unauthenticated_runtime_client: TestClient,
+    method: str,
+) -> None:
+    path = (
+        "/api/v1/runtime/invocations"
+        if method == "post"
+        else f"/api/v1/runtime/invocations/{uuid4()}"
+    )
+    payload = {"model_id": str(uuid4()), "input": "runtime"} if method == "post" else None
+    for authorization in (None, "Bearer invalid-runtime", f"Bearer {TEST_MANAGEMENT_TOKEN}"):
+        headers = {} if authorization is None else {"Authorization": authorization}
+        response = unauthenticated_runtime_client.request(
+            method, path, json=payload, headers=headers
+        )
+        assert response.status_code == 401
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+        assert_problem(response.status_code, response.headers["content-type"], response.json())
+        assert "invalid-runtime" not in response.text
+        assert TEST_MANAGEMENT_TOKEN not in response.text
+
+
+@pytest.mark.integration
+def test_runtime_credential_cannot_authenticate_management_api(
+    unauthenticated_runtime_client: TestClient,
+) -> None:
+    agent_id = uuid4()
+    configure_runtime_principal(unauthenticated_runtime_client, uuid4(), agent_id)
+    response = unauthenticated_runtime_client.post(
+        "/api/v1/tenants",
+        json={"name": "Runtime credential must fail"},
+        headers=runtime_headers(agent_id),
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.integration
+def test_runtime_request_schema_has_no_caller_controlled_identity_claims(
+    runtime_client: TestClient,
+) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    response = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json={
+            "tenant_id": str(tenant_id),
+            "agent_id": str(agent_id),
+            "model_id": str(model_id),
+            "input": "attempted identity override",
+        },
+        headers=runtime_headers(agent_id),
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.integration
+def test_runtime_principals_can_only_read_their_own_invocations(
+    runtime_client: TestClient,
+) -> None:
+    tenant_a, agent_a, model_a = runtime_references(runtime_client)
+    tenant_b = create_tenant(runtime_client, "Runtime Principal B")
+    agent_b = create_agent(runtime_client, tenant_b, "Agent B")
+    model_b = create_model(runtime_client, tenant_b, "Model B")
+    set_permission(runtime_client, tenant_a, agent_a, model_a, "allow")
+    set_permission(runtime_client, tenant_b, agent_b, model_b, "allow")
+
+    invocation_a = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_a),
+        headers=runtime_headers(agent_a),
+    )
+    invocation_b = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_b),
+        headers=runtime_headers(agent_b),
+    )
+    assert invocation_a.status_code == invocation_b.status_code == 201
+    invocation_a_id = invocation_a.json()["invocation_id"]
+    invocation_b_id = invocation_b.json()["invocation_id"]
+    assert invocation_a.json()["runtime_principal_id"] == f"runtime-{agent_a}"
+    assert invocation_b.json()["runtime_principal_id"] == f"runtime-{agent_b}"
+
+    assert (
+        runtime_client.get(
+            f"/api/v1/runtime/invocations/{invocation_a_id}",
+            headers=runtime_headers(agent_a),
+        ).status_code
+        == 200
+    )
+    assert (
+        runtime_client.get(
+            f"/api/v1/runtime/invocations/{invocation_b_id}",
+            headers=runtime_headers(agent_b),
+        ).status_code
+        == 200
+    )
+    assert (
+        runtime_client.get(
+            f"/api/v1/runtime/invocations/{invocation_b_id}",
+            headers=runtime_headers(agent_a),
+        ).status_code
+        == 404
+    )
+    assert (
+        runtime_client.get(
+            f"/api/v1/runtime/invocations/{invocation_a_id}",
+            headers=runtime_headers(agent_b),
+        ).status_code
+        == 404
+    )
 
 
 @pytest.mark.integration
@@ -179,7 +321,8 @@ async def test_tenant_scoped_management_authorization_is_non_disclosing_and_fail
     assert unauthorized_allow.status_code == 404
     denied_runtime = runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(tenant_b, agent_b, model_b),
+        json=invocation_payload(model_b),
+        headers=runtime_headers(agent_b),
     )
     assert denied_runtime.status_code == 403
     assert runtime_provider.calls == []
@@ -264,21 +407,19 @@ def test_management_reads_and_invalid_credentials_are_rejected(
 
 
 @pytest.mark.integration
-def test_health_and_runtime_routes_do_not_require_management_credential(
+def test_health_is_public_but_runtime_requires_separate_credential(
     unauthenticated_runtime_client: TestClient,
 ) -> None:
     assert unauthenticated_runtime_client.get("/health/live").status_code == 200
     runtime = unauthenticated_runtime_client.post(
         "/api/v1/runtime/invocations",
         json={
-            "tenant_id": str(uuid4()),
-            "agent_id": str(uuid4()),
             "model_id": str(uuid4()),
             "input": "No management credential",
         },
     )
-    assert runtime.status_code == 404
-    assert runtime.json()["title"] == "Runtime Resource Not Found"
+    assert runtime.status_code == 401
+    assert runtime.json()["title"] == "Unauthorized"
 
 
 @pytest.mark.integration
@@ -311,6 +452,7 @@ def test_anonymous_policy_mutation_cannot_bypass_default_deny(
     )
     agent_id = UUID(agent_response.json()["id"])
     model_id = UUID(model_response.json()["id"])
+    configure_runtime_principal(unauthenticated_runtime_client, tenant_id, agent_id)
     permission_payload = {
         "tenant_id": str(tenant_id),
         "agent_id": str(agent_id),
@@ -324,7 +466,8 @@ def test_anonymous_policy_mutation_cannot_bypass_default_deny(
     assert anonymous_allow.status_code == 401
     denied = unauthenticated_runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(tenant_id, agent_id, model_id),
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
     )
     assert denied.status_code == 403
     assert runtime_provider.calls == []
@@ -337,7 +480,8 @@ def test_anonymous_policy_mutation_cannot_bypass_default_deny(
     assert authenticated_allow.status_code == 200
     allowed = unauthenticated_runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(tenant_id, agent_id, model_id),
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
     )
     assert allowed.status_code == 201
     assert runtime_provider.calls == [("gpt-test", "Explain zero trust.")]
@@ -352,7 +496,8 @@ def test_create_then_get_invocation_with_deterministic_provider(
     set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
     created = runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(tenant_id, agent_id, model_id),
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
     )
     assert created.status_code == 201
     body = created.json()
@@ -361,7 +506,10 @@ def test_create_then_get_invocation_with_deterministic_provider(
     assert body["input"] == "Explain zero trust."
     assert created.headers["location"] == (f"/api/v1/runtime/invocations/{body['invocation_id']}")
     assert runtime_provider.calls == [("gpt-test", "Explain zero trust.")]
-    retrieved = runtime_client.get(f"/api/v1/runtime/invocations/{body['invocation_id']}")
+    retrieved = runtime_client.get(
+        f"/api/v1/runtime/invocations/{body['invocation_id']}",
+        headers=runtime_headers(agent_id),
+    )
     assert retrieved.status_code == 200
     assert retrieved.json() == body
     assert body["policy_decision_id"]
@@ -416,12 +564,13 @@ def test_malformed_permission_effect_is_rejected(runtime_client: TestClient) -> 
 
 @pytest.mark.integration
 def test_cross_tenant_agent_is_hidden_as_not_found(runtime_client: TestClient) -> None:
-    tenant_id, _, model_id = runtime_references(runtime_client)
+    _, _, model_id = runtime_references(runtime_client)
     other_tenant = create_tenant(runtime_client, "Runtime Globex")
     other_agent = create_agent(runtime_client, other_tenant, "Other Agent")
     response = runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(tenant_id, other_agent, model_id),
+        json=invocation_payload(model_id),
+        headers=runtime_headers(other_agent),
     )
     assert response.status_code == 404
     assert response.json()["title"] == "Runtime Resource Not Found"
@@ -429,12 +578,13 @@ def test_cross_tenant_agent_is_hidden_as_not_found(runtime_client: TestClient) -
 
 @pytest.mark.integration
 def test_cross_tenant_model_is_hidden_as_not_found(runtime_client: TestClient) -> None:
-    tenant_id, agent_id, _ = runtime_references(runtime_client)
+    _, agent_id, _ = runtime_references(runtime_client)
     other_tenant = create_tenant(runtime_client, "Runtime Globex")
     other_model = create_model(runtime_client, other_tenant, "Other Model")
     response = runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(tenant_id, agent_id, other_model),
+        json=invocation_payload(other_model),
+        headers=runtime_headers(agent_id),
     )
     assert response.status_code == 404
     assert response.json()["title"] == "Runtime Resource Not Found"
@@ -447,11 +597,20 @@ def test_missing_runtime_reference_returns_non_disclosing_not_found(
 ) -> None:
     tenant_id, agent_id, model_id = runtime_references(runtime_client)
     set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
-    values = {"tenant": tenant_id, "agent": agent_id, "model": model_id}
-    values[missing] = uuid4()
+    authenticated_agent = agent_id
+    requested_model = model_id
+    if missing == "tenant":
+        authenticated_agent = uuid4()
+        configure_runtime_principal(runtime_client, uuid4(), authenticated_agent)
+    elif missing == "agent":
+        authenticated_agent = uuid4()
+        configure_runtime_principal(runtime_client, tenant_id, authenticated_agent)
+    else:
+        requested_model = uuid4()
     response = runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(values["tenant"], values["agent"], values["model"]),
+        json=invocation_payload(requested_model),
+        headers=runtime_headers(authenticated_agent),
     )
     assert response.status_code == 404
     assert_problem(response.status_code, response.headers["content-type"], response.json())
@@ -465,7 +624,8 @@ def test_unsupported_registered_provider_returns_problem(runtime_client: TestCli
     model_id = create_model(runtime_client, tenant_id, "Anthropic Model", provider="anthropic")
     response = runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(tenant_id, agent_id, model_id),
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
     )
     assert response.status_code == 422
     assert_problem(response.status_code, response.headers["content-type"], response.json())
@@ -484,7 +644,8 @@ async def test_provider_failure_returns_bad_gateway_and_persists_failed_invocati
     runtime_provider.fails = True
     response = runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(tenant_id, agent_id, model_id),
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
     )
     assert response.status_code == 502
     assert_problem(response.status_code, response.headers["content-type"], response.json())
@@ -527,7 +688,8 @@ async def test_default_and_explicit_deny_never_call_provider(
         set_permission(runtime_client, tenant_id, agent_id, model_id, "deny")
     response = runtime_client.post(
         "/api/v1/runtime/invocations",
-        json=invocation_payload(tenant_id, agent_id, model_id),
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
     )
     assert response.status_code == 403
     assert response.json()["title"] == "Invocation Denied"
@@ -553,21 +715,24 @@ async def test_default_and_explicit_deny_never_call_provider(
 
 @pytest.mark.integration
 def test_missing_invocation_returns_not_found(runtime_client: TestClient) -> None:
-    response = runtime_client.get(f"/api/v1/runtime/invocations/{uuid4()}")
+    _, agent_id, _ = runtime_references(runtime_client)
+    response = runtime_client.get(
+        f"/api/v1/runtime/invocations/{uuid4()}", headers=runtime_headers(agent_id)
+    )
     assert response.status_code == 404
     assert response.json()["title"] == "Invocation Not Found"
 
 
 @pytest.mark.integration
 def test_invalid_invocation_input_returns_validation_problem(runtime_client: TestClient) -> None:
+    _, agent_id, model_id = runtime_references(runtime_client)
     response = runtime_client.post(
         "/api/v1/runtime/invocations",
         json={
-            "tenant_id": "not-a-uuid",
-            "agent_id": str(uuid4()),
-            "model_id": str(uuid4()),
+            "model_id": str(model_id),
             "input": "",
         },
+        headers=runtime_headers(agent_id),
     )
     assert response.status_code == 422
     assert_problem(response.status_code, response.headers["content-type"], response.json())

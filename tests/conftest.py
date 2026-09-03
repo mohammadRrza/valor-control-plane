@@ -5,7 +5,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from valor.bootstrap.application import create_app
-from valor.bootstrap.settings import DatabaseSettings, SecuritySettings, Settings
+from valor.bootstrap.settings import (
+    DatabaseSettings,
+    RuntimeAuthenticationSettings,
+    SecuritySettings,
+    Settings,
+)
 
 TEST_MANAGEMENT_TOKEN = "test-only-management-token-32-bytes"
 
@@ -19,6 +24,7 @@ def settings() -> Settings:
             management_token=TEST_MANAGEMENT_TOKEN,
             management_tenant_ids=frozenset(),
         ),
+        runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )
 
 

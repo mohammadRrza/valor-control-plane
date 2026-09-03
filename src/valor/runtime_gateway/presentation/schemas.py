@@ -11,8 +11,6 @@ from valor.runtime_gateway.domain.invocation import MAX_INVOCATION_INPUT_LENGTH,
 class CreateInvocationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    tenant_id: UUID
-    agent_id: UUID
     model_id: UUID
     input: str = Field(min_length=1, max_length=MAX_INVOCATION_INPUT_LENGTH)
 
@@ -28,6 +26,7 @@ class InvocationResponse(BaseModel):
     started_at: datetime
     completed_at: datetime
     policy_decision_id: UUID
+    runtime_principal_id: str
 
     @classmethod
     def from_domain(cls, invocation: Invocation) -> "InvocationResponse":
@@ -42,4 +41,5 @@ class InvocationResponse(BaseModel):
             started_at=invocation.started_at,
             completed_at=invocation.completed_at,
             policy_decision_id=invocation.policy_decision_id.value,
+            runtime_principal_id=invocation.runtime_principal_id,
         )

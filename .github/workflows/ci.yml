@@ -31,6 +31,7 @@ jobs:
       VALOR_SECURITY__MANAGEMENT_PRINCIPAL_ID: ci-management
       VALOR_SECURITY__MANAGEMENT_TOKEN: test-only-ci-management-token-32-bytes
       VALOR_SECURITY__MANAGEMENT_TENANT_IDS: '[]'
+      VALOR_RUNTIME_AUTH__PRINCIPALS: '[]'
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

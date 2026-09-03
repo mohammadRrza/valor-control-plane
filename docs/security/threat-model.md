@@ -13,7 +13,7 @@ boundaries materially change.
 ```mermaid
 flowchart LR
   MC[Management client] -->|Management bearer token| MP[Management API]
-  RC[Unauthenticated runtime client] --> RG[Runtime Gateway]
+  RC[Authenticated runtime principal] -->|Distinct runtime bearer| RG[Runtime Gateway]
   MP --> D[(PostgreSQL)]
   RG --> PR[Policy admission]
   PR --> D
@@ -40,7 +40,7 @@ though the current model treats them as plain text.
 - PostgreSQL and its administrative access are not exposed to untrusted clients.
 - Host, container runtime, dependency, and CI compromise are outside the application's current
   controls but can invalidate every trust boundary below.
-- Runtime endpoints must not be exposed to untrusted networks in the current phase.
+- Static runtime credentials require TLS and secure injection; they have no rotation or revocation.
 
 ## Trust boundaries
 
@@ -61,19 +61,13 @@ lack of individual accountability, and lack of a policy-change audit trail.
 
 ### Runtime client to Runtime Gateway
 
-This is the largest open boundary. Runtime requests currently supply Tenant and Agent IDs without
-proving that the caller owns either identity. A reachable attacker could claim an Agent with an
-existing ALLOW permission and invoke its Model.
+Runtime routes now require a credential from a separate configuration-backed trust domain. Each
+credential resolves to exactly one Tenant and Agent; POST accepts no caller-controlled Tenant or
+Agent claims. GET requires exact runtime principal, Tenant, and Agent correlation. This mitigates
+the original Agent-spoofing and known-Invocation-ID disclosure paths.
 
-Policy evaluation may be logically correct while operating on an untrusted identity claim:
-
-```text
-unauthenticated caller → claims Agent A → Agent A is allowed → provider executes
-```
-
-The same boundary affects `GET /api/v1/runtime/invocations/{invocation_id}`. A caller that learns an
-Invocation UUID may retrieve stored input/output without proving Tenant, Agent, or originating
-principal identity.
+Residual risks remain significant: credentials are static and replayable, have no expiry,
+rotation, dynamic revocation, issuance workflow, rate limit, or workload-attestation mechanism.
 
 ### Runtime Gateway to provider
 
@@ -112,34 +106,36 @@ have no durable management actor record, and lack of permission history or appro
 
 | Category | Threat | Current control | Residual severity | Next control |
 |---|---|---|---|---|
-| Spoofing | Caller claims another Agent/Tenant at runtime | Ownership and policy validate claims, not caller identity | Critical/High | Separate runtime principal authentication |
+| Spoofing | Caller claims another Agent/Tenant at runtime | Identity derives from a credential bound to one Tenant/Agent | Mitigated; credential theft remains High | Rotation/revocation and workload identity |
 | Spoofing | Management principal impersonation | Static bearer authentication, constant-time comparison | High | Rotation and multiple federated principals |
 | Tampering | Unauthorized policy mutation | Management auth, exact Tenant scope, DB constraints | Medium | Management mutation audit/history |
 | Tampering | Direct Invocation/Decision changes | DB access boundary and constraints | High if DB compromised | Restricted DB roles and tamper-evident evidence |
 | Repudiation | Operator denies changing a permission | Stable principal exists only in request boundary | Medium | Persist management action evidence |
-| Information disclosure | Runtime GET reveals prompt/response | UUID lookup and sanitized errors only | High | Runtime identity and invocation read authorization |
+| Information disclosure | Cross-principal Runtime GET reveals prompt/response | Exact principal/Tenant/Agent correlation and non-disclosing 404 | Mitigated; stored-data risk remains High/Medium | Retention, redaction, encryption policy |
 | Information disclosure | Database/backup reveals prompt/response | Infrastructure access boundary | High/Medium | Retention, redaction, classification, encryption policy |
 | Denial of service | Runtime exhausts connections/provider capacity | Provider timeout | High/Medium | Identity-aware limits and concurrency controls |
-| Cost abuse | Unauthorized provider traffic incurs spend | Default-deny model policy | High while caller identity is untrusted | Runtime authentication, then quotas/budgets |
-| Elevation of privilege | Caller claims a more privileged Agent | No effective caller-to-Agent binding | Critical/High | Credential bound to exactly one Tenant/Agent |
+| Cost abuse | Stolen runtime credential incurs provider spend | Runtime authentication plus default-deny model policy | High/Medium | Rotation, rate limits, quotas/budgets |
+| Elevation of privilege | Caller claims a more privileged Agent | Request identity removed; credential binds exact Tenant/Agent | Mitigated; stolen credential remains High | Managed workload identity lifecycle |
 
 ## Highest-priority attack scenario
 
-Assume Agent A may use Model X while Agent B may not. An unauthenticated caller can submit Agent A's
-ID. VALOR validates that Agent A belongs to the Tenant and has ALLOW, but cannot establish that the
-caller is Agent A. This is an identity-spoofing path through an otherwise correct authorization
-decision and can cause data disclosure and direct provider cost.
+Before Phase 2.4, if Agent A could use Model X while Agent B could not, an unauthenticated caller
+could submit Agent A's ID. VALOR validated that Agent A belonged to the Tenant and had ALLOW, but
+could not establish that the caller was Agent A. This was an identity-spoofing path through an
+otherwise correct authorization decision that could cause data disclosure and direct provider cost.
 
-The next security slice should solve only this foundation: establish a runtime credential separate
-from the management credential, bind it to exactly one Tenant and Agent, reject mismatched claims,
-retain independent Agent-to-Model policy evaluation, and isolate Invocation reads by authenticated
-runtime principal.
+Phase 2.4 mitigates this scenario with a distinct Runtime Principal, removal of caller-controlled
+Tenant/Agent fields, independent policy enforcement, and principal-isolated reads. Static
+credential theft/replay now replaces unauthenticated identity claims as the principal residual
+runtime identity risk.
 
 ## Current posture
 
 Implemented strengths:
 
 - management authentication and explicit Tenant-scoped authorization;
+- separate Runtime authentication bound to an exact Tenant and Agent;
+- non-disclosing Runtime read isolation by principal, Tenant, and Agent;
 - Tenant ownership and non-disclosing cross-Tenant management failures;
 - default-deny Agent-to-Model runtime admission;
 - persisted PolicyDecision and Invocation records;
@@ -148,19 +144,15 @@ Implemented strengths:
 
 Material gaps:
 
-1. Runtime client authentication and caller-to-Agent binding — Critical/High.
-2. Runtime Invocation read authorization — High.
-3. Sensitive Invocation data retention/redaction policy — High/Medium.
+1. Static runtime credential lifecycle, theft, replay, rotation, and revocation — High.
+2. Sensitive Invocation data retention/redaction policy — High/Medium.
+3. Identity-aware rate, concurrency, and budget controls — Medium.
 4. Individual management accountability and policy-change audit — Medium.
-5. Credential rotation — Medium.
-6. Identity-aware rate, concurrency, and budget controls — Medium.
 
 ## Recommended sequence
 
 ```text
-Runtime principal authentication
-  → Runtime Tenant/Agent claim binding
-  → Invocation read isolation
+Managed runtime credential issuance/rotation/revocation
   → Usage metadata and observability
   → Per-principal rate/budget controls
   → Sensitive-data retention and redaction

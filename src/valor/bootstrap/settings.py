@@ -4,7 +4,15 @@ from functools import lru_cache
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, PostgresDsn, SecretStr, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PostgresDsn,
+    SecretStr,
+    StringConstraints,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,6 +47,34 @@ class SecuritySettings(BaseModel):
     management_tenant_ids: frozenset[UUID]
 
 
+class RuntimePrincipalSettings(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    principal_id: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ]
+    tenant_id: UUID
+    agent_id: UUID
+    credential: SecretStr = Field(min_length=32)
+
+
+class RuntimeAuthenticationSettings(BaseModel):
+    principals: tuple[RuntimePrincipalSettings, ...]
+
+    @model_validator(mode="after")
+    def reject_ambiguous_principals(self) -> "RuntimeAuthenticationSettings":
+        principal_ids = [principal.principal_id for principal in self.principals]
+        credentials = [principal.credential.get_secret_value() for principal in self.principals]
+        bindings = [(principal.tenant_id, principal.agent_id) for principal in self.principals]
+        if len(principal_ids) != len(set(principal_ids)):
+            raise ValueError("Runtime principal IDs must be unique.")
+        if len(credentials) != len(set(credentials)):
+            raise ValueError("Runtime principal credentials must be unique.")
+        if len(bindings) != len(set(bindings)):
+            raise ValueError("Only one runtime principal may be configured per Agent.")
+        return self
+
+
 class Settings(BaseSettings):
     """VALOR settings loaded once at the composition root."""
 
@@ -55,6 +91,17 @@ class Settings(BaseSettings):
     observability: ObservabilitySettings = ObservabilitySettings()
     provider: ProviderSettings = ProviderSettings()
     security: SecuritySettings
+    runtime_auth: RuntimeAuthenticationSettings
+
+    @model_validator(mode="after")
+    def separate_management_and_runtime_credentials(self) -> "Settings":
+        management = self.security.management_token.get_secret_value()
+        if any(
+            principal.credential.get_secret_value() == management
+            for principal in self.runtime_auth.principals
+        ):
+            raise ValueError("Management and runtime credentials must be distinct.")
+        return self
 
 
 @lru_cache

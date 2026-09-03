@@ -127,6 +127,7 @@ def succeeded_invocation(
         STARTED_AT,
         COMPLETED_AT,
         DECISION_ID,
+        "runtime-principal",
     )
 
 
@@ -160,6 +161,7 @@ async def test_failed_invocation_persists_without_output(runtime_database_url: s
         STARTED_AT,
         COMPLETED_AT,
         DECISION_ID,
+        "runtime-principal",
     )
     async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
         await unit_of_work.invocations.add(expected)

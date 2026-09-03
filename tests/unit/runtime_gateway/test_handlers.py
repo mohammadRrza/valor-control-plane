@@ -169,7 +169,9 @@ def handler(
 
 
 def command() -> CreateInvocationCommand:
-    return CreateInvocationCommand(TENANT_ID, AGENT_ID, MODEL_ID, " explain zero trust ")
+    return CreateInvocationCommand(
+        "runtime-principal", TENANT_ID, AGENT_ID, MODEL_ID, " explain zero trust "
+    )
 
 
 @pytest.mark.asyncio
@@ -268,6 +270,7 @@ async def test_get_invocation_returns_record_without_commit() -> None:
         STARTED_AT,
         COMPLETED_AT,
         DECISION_ID,
+        "runtime-principal",
     )
     await repository.add(invocation)
     unit_of_work = RecordingInvocationUnitOfWork(repository)

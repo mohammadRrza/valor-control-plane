@@ -45,9 +45,12 @@ class Invocation:
     started_at: datetime
     completed_at: datetime
     policy_decision_id: PolicyDecisionId
+    runtime_principal_id: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "input_text", validated_input(self.input_text))
+        if not self.runtime_principal_id.strip():
+            raise ValueError("Invocation runtime principal identity must not be empty.")
         for timestamp in (self.started_at, self.completed_at):
             if timestamp.tzinfo is None or timestamp.utcoffset() is None:
                 raise ValueError("Invocation timestamps must be timezone-aware.")
@@ -71,6 +74,7 @@ class Invocation:
         started_at: datetime,
         completed_at: datetime,
         policy_decision_id: PolicyDecisionId,
+        runtime_principal_id: str,
     ) -> "Invocation":
         return cls(
             invocation_id,
@@ -83,6 +87,7 @@ class Invocation:
             started_at,
             completed_at,
             policy_decision_id,
+            runtime_principal_id,
         )
 
     @classmethod
@@ -96,6 +101,7 @@ class Invocation:
         started_at: datetime,
         completed_at: datetime,
         policy_decision_id: PolicyDecisionId,
+        runtime_principal_id: str,
     ) -> "Invocation":
         return cls(
             invocation_id,
@@ -108,6 +114,7 @@ class Invocation:
             started_at,
             completed_at,
             policy_decision_id,
+            runtime_principal_id,
         )
 
     @classmethod
@@ -121,6 +128,7 @@ class Invocation:
         started_at: datetime,
         completed_at: datetime,
         policy_decision_id: PolicyDecisionId,
+        runtime_principal_id: str,
     ) -> "Invocation":
         return cls(
             invocation_id,
@@ -133,4 +141,5 @@ class Invocation:
             started_at,
             completed_at,
             policy_decision_id,
+            runtime_principal_id,
         )

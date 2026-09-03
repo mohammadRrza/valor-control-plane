@@ -4,7 +4,12 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
-from valor.bootstrap.settings import DatabaseSettings, SecuritySettings, Settings
+from valor.bootstrap.settings import (
+    DatabaseSettings,
+    RuntimeAuthenticationSettings,
+    SecuritySettings,
+    Settings,
+)
 from valor.security.application.principal import AuthenticatedPrincipal, PrincipalKind
 from valor.security.presentation.authentication import require_management_principal
 from valor.security.presentation.errors import install_security_error_handlers
@@ -22,6 +27,7 @@ def authentication_client() -> TestClient:
             management_token=TOKEN,
             management_tenant_ids=frozenset(),
         ),
+        runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )
 
     @app.get("/protected")

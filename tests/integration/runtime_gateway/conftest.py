@@ -7,7 +7,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from valor.bootstrap.application import create_app
-from valor.bootstrap.settings import DatabaseSettings, SecuritySettings, Settings
+from valor.bootstrap.settings import (
+    DatabaseSettings,
+    RuntimeAuthenticationSettings,
+    SecuritySettings,
+    Settings,
+)
 from valor.runtime_gateway.application.ports import (
     ProviderInvocationResult,
     ProviderTransportError,
@@ -75,6 +80,7 @@ def runtime_client(
             management_token=TEST_MANAGEMENT_TOKEN,
             management_tenant_ids=frozenset(),
         ),
+        runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )
     with TestClient(
         create_app(settings, runtime_provider=runtime_provider),
@@ -95,6 +101,7 @@ def unauthenticated_runtime_client(
             management_token=TEST_MANAGEMENT_TOKEN,
             management_tenant_ids=frozenset(),
         ),
+        runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )
     with TestClient(create_app(settings, runtime_provider=runtime_provider)) as client:
         yield client

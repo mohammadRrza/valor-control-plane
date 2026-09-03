@@ -20,6 +20,7 @@ MODEL_ID = ModelId(UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
 STARTED_AT = datetime(2026, 2, 3, 4, 5, tzinfo=UTC)
 COMPLETED_AT = STARTED_AT + timedelta(seconds=1)
 DECISION_ID = PolicyDecisionId(UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+PRINCIPAL_ID = "runtime-principal"
 
 
 def test_succeeded_invocation_has_valor_identity_and_final_output() -> None:
@@ -33,11 +34,13 @@ def test_succeeded_invocation_has_valor_identity_and_final_output() -> None:
         STARTED_AT,
         COMPLETED_AT,
         DECISION_ID,
+        PRINCIPAL_ID,
     )
     assert invocation.id == INVOCATION_ID
     assert invocation.status is InvocationStatus.SUCCEEDED
     assert invocation.input_text == "Explain zero trust."
     assert invocation.output_text == "Trust must be continuously verified."
+    assert invocation.runtime_principal_id == PRINCIPAL_ID
 
 
 def test_failed_invocation_has_no_provider_output() -> None:
@@ -50,6 +53,7 @@ def test_failed_invocation_has_no_provider_output() -> None:
         STARTED_AT,
         COMPLETED_AT,
         DECISION_ID,
+        PRINCIPAL_ID,
     )
     assert invocation.status is InvocationStatus.FAILED
     assert invocation.output_text is None
@@ -67,6 +71,7 @@ def test_invocation_rejects_empty_input(input_text: str) -> None:
             STARTED_AT,
             COMPLETED_AT,
             DECISION_ID,
+            PRINCIPAL_ID,
         )
 
 
@@ -81,6 +86,7 @@ def test_invocation_rejects_oversized_input() -> None:
             STARTED_AT,
             COMPLETED_AT,
             DECISION_ID,
+            PRINCIPAL_ID,
         )
 
 
@@ -96,6 +102,7 @@ def test_succeeded_invocation_requires_output() -> None:
             STARTED_AT,
             COMPLETED_AT,
             DECISION_ID,
+            PRINCIPAL_ID,
         )
 
 
@@ -112,6 +119,7 @@ def test_failed_invocation_rejects_output() -> None:
             STARTED_AT,
             COMPLETED_AT,
             DECISION_ID,
+            PRINCIPAL_ID,
         )
 
 
@@ -135,6 +143,7 @@ def test_invocation_requires_timezone_aware_timestamps(
             started_at,
             completed_at,
             DECISION_ID,
+            PRINCIPAL_ID,
         )
 
 
@@ -149,13 +158,37 @@ def test_invocation_completion_cannot_precede_start() -> None:
             COMPLETED_AT,
             STARTED_AT,
             DECISION_ID,
+            PRINCIPAL_ID,
         )
 
 
 def test_denied_invocation_has_decision_and_no_output() -> None:
     invocation = Invocation.denied(
-        INVOCATION_ID, TENANT_ID, AGENT_ID, MODEL_ID, "input", STARTED_AT, COMPLETED_AT, DECISION_ID
+        INVOCATION_ID,
+        TENANT_ID,
+        AGENT_ID,
+        MODEL_ID,
+        "input",
+        STARTED_AT,
+        COMPLETED_AT,
+        DECISION_ID,
+        PRINCIPAL_ID,
     )
     assert invocation.status is InvocationStatus.DENIED
     assert invocation.output_text is None
     assert invocation.policy_decision_id == DECISION_ID
+
+
+def test_invocation_requires_runtime_principal_identity() -> None:
+    with pytest.raises(ValueError, match="runtime principal identity"):
+        Invocation.failed(
+            INVOCATION_ID,
+            TENANT_ID,
+            AGENT_ID,
+            MODEL_ID,
+            "input",
+            STARTED_AT,
+            COMPLETED_AT,
+            DECISION_ID,
+            " ",
+        )
