@@ -12,9 +12,9 @@ flowchart LR
   O[Platform Operators] --> V
 ```
 
-VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 implements only the operational shell.
+VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 established the operational shell; Phase 1 currently implements Tenant create/get and governed Agent register/get slices.
 
-## Phase 0 container and component view
+## Current container and component view
 
 ```mermaid
 flowchart TB
@@ -24,7 +24,10 @@ flowchart TB
   BOOT --> INFRA[SQLAlchemy infrastructure]
   INFRA -. implements .-> APP
   INFRA --> PG[(PostgreSQL)]
-  DOMAIN[Future context domain] <-- APP
+  APP --> TENANT[Identity & Tenancy domain]
+  INFRA -. implements tenant ports .-> TENANT
+  APP --> AGENT[AI Asset Registry domain]
+  INFRA -. implements agent ports .-> AGENT
 ```
 
 The application is one deployable process. Operational routes are outside domain APIs. PostgreSQL is the only runtime dependency. The domain remains synchronous; async appears at I/O boundaries.
@@ -43,7 +46,29 @@ The application is one deployable process. Operational routes are outside domain
 | Incident Management | detection and response lifecycle | consumes violations, SLOs and evaluation failures |
 | Compliance & Audit | immutable decision evidence | consumes explicit integration events/contracts |
 
-These are domain boundaries, not current packages or services. When implemented, each bounded context owns its `domain`, `application`, `infrastructure`, and `presentation` layers. Domain functionality must not accumulate indefinitely in global top-level application or infrastructure packages. Cross-context access will use published contracts or integration events rather than imports into another context's internals.
+These are domain boundaries, not services. Identity & Tenancy currently supports Tenant creation and retrieval. AI Asset Registry currently supports Agent registration and retrieval. Each bounded context owns its `domain`, `application`, `infrastructure`, and `presentation` layers. Domain functionality must not accumulate indefinitely in global top-level application or infrastructure packages. Cross-context access uses explicit contracts rather than imports into another context's internals.
+
+### Tenant slice decisions
+
+Tenant identity is an application-generated UUID and does not depend on persistence. A tenant name is trimmed, internal whitespace is collapsed, and the canonical value is limited to 100 characters. Names are globally unique for this slice under a case-folded canonical comparison; PostgreSQL enforces the normalized key so concurrent requests cannot bypass uniqueness. This global rule can be revisited only if a future, explicit tenancy hierarchy changes the domain meaning.
+
+The implemented endpoints have no authentication or authorization. They are an architecture proof and must not be exposed to untrusted networks.
+
+### Agent registry and tenant boundary
+
+```mermaid
+flowchart LR
+  T[Identity & Tenancy] -->|tenant identity / existence boundary| A[AI Asset Registry]
+  A --> I[Governed Agent Identity]
+  I -. future reference only .-> R[Runtime invocations]
+  I -. future reference only .-> P[Policies / evaluations / telemetry]
+```
+
+An AI Asset Registry Agent is a governed workload identity known to VALOR. It contains no executable agent code, model configuration, prompts, tools, credentials, or runtime behavior. Future Runtime Gateway requests may reference `tenant_id` and `agent_id`; the registry does not execute them.
+
+AI Asset Registry represents ownership with its local `OwningTenantId` value object. Its application layer asks only `TenantExistencePort.exists()`. The PostgreSQL adapter reads the published persistence identity `tenants.id` without importing the Tenant aggregate, repository, or ORM model. Registration checks existence for a clear error before opening the Agent write Unit of Work. The `agents.tenant_id` foreign key remains authoritative if state changes between the check and flush; that violation maps to the same `OwningTenantNotFound` application failure.
+
+Agent names use the same intentionally small canonicalization policy independently: trim/collapse whitespace, a 100-character canonical limit, and `casefold()` for comparison. The database composite constraint makes normalized names unique within an owning tenant, while allowing the same name in different tenants.
 
 ## Dependency and transaction rules
 
@@ -64,7 +89,7 @@ flowchart LR
   O --> B[Broker]
 ```
 
-No broker is deployed in Phase 0. CQRS is selective: commands change state; separate query views appear only where read/write models materially differ. Global event sourcing is rejected; append-only event storage may later suit narrow audit workloads.
+No broker is deployed. CQRS is selective: commands change state; separate query views appear only where read/write models materially differ. Global event sourcing is rejected; append-only event storage may later suit narrow audit workloads.
 
 A module may be extracted only with evidence for independent scaling, failure or latency isolation, security isolation, distinct storage/workload characteristics, independent deployment cadence, or stable team ownership. Extraction requires an owned API/event contract, data ownership, observability, failure semantics, and migration plan. Microservices are an option, not a destination.
 

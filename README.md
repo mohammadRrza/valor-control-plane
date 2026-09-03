@@ -6,11 +6,11 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 ## Status
 
-**Current phase: Phase 0 — Architecture & Engineering Foundation.**
+**Current phase: Phase 1 — Identity & Tenancy (in progress).**
 
-Implemented: a FastAPI application factory; PostgreSQL connectivity and readiness; liveness; centralized validated settings; structured logging; explicit SQLAlchemy Unit of Work; Alembic; architecture tests; CI; and local containers.
+Implemented: the Phase 0 engineering foundation; Tenant create/get; and AI Asset Registry Agent register/get, with PostgreSQL persistence, explicit tenant ownership, and scoped normalized-name uniqueness.
 
-Planned: all product capabilities, including identity, tenancy, asset registry, runtime routing, policy, evaluation, telemetry, FinOps, incidents, and compliance. No domain capability is represented as complete.
+Planned: the rest of Identity & Tenancy and AI Asset Registry, plus runtime routing, model/prompt/tool management, policy, evaluation, telemetry, FinOps, incident, and compliance capabilities. Neither implemented bounded context is complete.
 
 Experimental: none.
 
@@ -42,7 +42,14 @@ make docker-up         # API + PostgreSQL
 make docker-down
 ```
 
-The API listens on port 8000. Operational endpoints are `/health/live` and `/health/ready`; future domain APIs are versioned under `/api/v1`.
+The API listens on port 8000. Operational endpoints are `/health/live` and `/health/ready`. Implemented domain routes are:
+
+```text
+POST /api/v1/tenants
+GET  /api/v1/tenants/{tenant_id}
+POST /api/v1/agents
+GET  /api/v1/agents/{agent_id}
+```
 
 ## Repository layout
 
@@ -51,6 +58,16 @@ src/valor/
   api/             HTTP boundary and operational routes
   application/     use-case ports and orchestration contracts
   bootstrap/       composition, lifecycle, configuration, logging
+  ai_asset_registry/
+    domain/         governed Agent identity and repository port
+    application/    RegisterAgent/GetAgent and tenant-existence port
+    infrastructure/ persistence and tenant-existence adapters
+    presentation/   Agent HTTP contracts, routes, and error mappings
+  identity_tenancy/
+    domain/         Tenant aggregate and repository port
+    application/    CreateTenant and GetTenant use cases
+    infrastructure/ SQLAlchemy mapping, repository, and UoW adapter
+    presentation/   tenant HTTP contracts, routes, and error mapping
   infrastructure/  concrete adapters
   shared_kernel/   minimal framework-free primitives
 tests/             unit, integration, and architecture checks
@@ -61,5 +78,7 @@ docs/              architecture and decisions
 ## Security and contributions
 
 Never commit `.env`, secrets, tokens, credentials, or sensitive payloads. Logs must use allow-listed metadata and must not contain prompts or credentials. Treat migrations as reviewed production changes: provide reversible downgrades where safe and never edit an applied revision. Contributions should include proportionate tests, updated documentation, and pass every `make lint`, `make typecheck`, and `make test` check. Use Conventional Commit subjects (for example, `feat(identity): register tenant`) without adding commit tooling solely to enforce formatting.
+
+**Security status:** authentication and authorization are not implemented. Tenant and Agent management endpoints must not be exposed to untrusted networks in their current form.
 
 The roadmap is documented in [ROADMAP.md](ROADMAP.md). VALOR is licensed under the [Apache License 2.0](LICENSE).

@@ -2,8 +2,8 @@
 
 This direction is intentionally revisable as architecture and product evidence emerge.
 
-1. **Phase 0 — Foundation (current):** modular-monolith boundaries, HTTP/database lifecycle, engineering controls, documentation.
-2. **Phase 1 — Identity, Tenancy, Asset Registry:** smallest end-to-end tenant and AI asset ownership slice.
+1. **Phase 0 — Foundation (complete):** modular-monolith boundaries, HTTP/database lifecycle, engineering controls, documentation.
+2. **Phase 1 — Identity, Tenancy, Asset Registry (in progress):** Tenant create/get and governed Agent register/get vertical slices implemented; remaining identity and asset capabilities are planned.
 3. **Phase 2 — LLM Runtime Gateway:** provider-neutral invocation boundary and routing.
 4. **Phase 3 — Telemetry:** OpenTelemetry-based request and agent traces.
 5. **Phase 4 — Policy & Risk:** explicit decisions and explainable enforcement.
@@ -15,4 +15,3 @@ This direction is intentionally revisable as architecture and product evidence e
 11. **Phase 10 — Broker/outbox:** Kafka or Redpanda only when event volume and consumers justify it.
 12. **Phase 11 — Deployment platform:** Kubernetes, Helm, OpenTofu/Terraform, and GitOps when operational scale requires them.
 13. **Phase 12 — Advanced delivery security:** supply-chain controls and progressive delivery based on concrete threat and release models.
-

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from tests.architecture.dependency_checker import find_violations
+from tests.architecture.dependency_checker import find_violations, imports_in
 
 SOURCE = Path(__file__).parents[2] / "src"
 
@@ -10,3 +10,16 @@ def test_repository_dependency_boundaries() -> None:
     assert not violations, "Architecture violations:\n" + "\n".join(
         violation.describe() for violation in violations
     )
+
+
+def test_ai_asset_registry_does_not_import_identity_tenancy_internals() -> None:
+    context = SOURCE / "valor" / "ai_asset_registry"
+    violations: list[str] = []
+    for layer in ("domain", "application"):
+        for path in (context / layer).rglob("*.py"):
+            for imported_module, line in imports_in(SOURCE, path):
+                if imported_module.startswith("valor.identity_tenancy"):
+                    violations.append(
+                        f"{path.relative_to(SOURCE)}:{line} imports {imported_module}"
+                    )
+    assert not violations, "Cross-context internal imports:\n" + "\n".join(violations)

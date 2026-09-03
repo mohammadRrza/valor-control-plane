@@ -42,11 +42,11 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
+      - run: uv run alembic upgrade head
       - run: uv run pytest --no-cov tests/architecture
       - run: uv run pytest --no-cov tests/unit
       - run: uv run pytest --no-cov tests/integration
       - run: uv run pytest
-      - run: uv run alembic upgrade head
       - run: uv build
 
   container:
