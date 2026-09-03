@@ -12,7 +12,7 @@ flowchart LR
   O[Platform Operators] --> V
 ```
 
-VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 established the operational shell; Phase 1 currently implements Tenant create/get plus governed Agent and Model reference register/get slices.
+VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 established the operational shell; Phase 1 added Tenant, Agent, and governed Model reference slices. Phase 2 now has one synchronous OpenAI text-invocation path with persisted final outcomes; it is not a complete LLM gateway.
 
 ## Current container and component view
 
@@ -28,6 +28,9 @@ flowchart TB
   INFRA -. implements tenant ports .-> TENANT
   APP --> ASSET[AI Asset Registry domain]
   INFRA -. implements asset ports .-> ASSET
+  APP --> RUNTIME[Runtime Gateway domain]
+  INFRA -. implements runtime ports .-> RUNTIME
+  INFRA --> OPENAI[OpenAI Responses API]
 ```
 
 The application is one deployable process. Operational routes are outside domain APIs. PostgreSQL is the only runtime dependency. The domain remains synchronous; async appears at I/O boundaries.
@@ -46,7 +49,7 @@ The application is one deployable process. Operational routes are outside domain
 | Incident Management | detection and response lifecycle | consumes violations, SLOs and evaluation failures |
 | Compliance & Audit | immutable decision evidence | consumes explicit integration events/contracts |
 
-These are domain boundaries, not services. Identity & Tenancy currently supports Tenant creation and retrieval. AI Asset Registry currently supports Agent and governed Model reference registration and retrieval. Each bounded context owns its `domain`, `application`, `infrastructure`, and `presentation` layers. Domain functionality must not accumulate indefinitely in global top-level application or infrastructure packages. Cross-context access uses explicit contracts rather than imports into another context's internals.
+These are domain boundaries, not services. Identity & Tenancy currently supports Tenant creation and retrieval. AI Asset Registry currently supports Agent and governed Model reference registration and retrieval. Runtime Gateway currently supports creation and retrieval of one synchronous text Invocation through OpenAI. Each bounded context owns its `domain`, `application`, `infrastructure`, and `presentation` layers. Domain functionality must not accumulate indefinitely in global top-level application or infrastructure packages. Cross-context access uses explicit contracts rather than imports into another context's internals.
 
 ### Tenant slice decisions
 
@@ -79,6 +82,30 @@ Model names are trimmed, internal whitespace is collapsed, and the canonical val
 `Provider` is a Python string enum stored in a 50-character varchar. This gives API callers an explicit supported vocabulary while avoiding a PostgreSQL enum migration whenever that vocabulary grows. Provider model references are treated as opaque trimmed strings of at most 255 characters; provider-specific syntax and live validation are deferred until an actual provider-integration use case exists.
 
 Model registration reuses the AI Asset Registry's `TenantExistencePort` and local `OwningTenantId`. A pre-check produces a useful error, while the `models.tenant_id` foreign key remains authoritative under races. Model persistence has its own repository and Unit of Work surface; no generic AI-asset repository or service hierarchy was introduced.
+
+### First Runtime Gateway slice
+
+```mermaid
+flowchart LR
+  C[Client] --> RG[Runtime Gateway]
+  RG --> A[Admission projections]
+  A --> PG[(Shared PostgreSQL)]
+  RG --> O[OpenAI Responses adapter]
+  O --> OA[OpenAI Responses API]
+  RG --> I[(Final Invocation outcome)]
+```
+
+An Invocation is a VALOR-owned UUID plus Tenant, Agent, and Model IDs, final `succeeded` or `failed` status, text input, optional successful output, and timezone-aware start/completion timestamps. It does not use an upstream request ID as identity and has no token, cost, retry, tracing, policy, tool, or evaluation fields.
+
+Runtime admission uses local identity/projection types and three narrow application ports. A PostgreSQL adapter queries only the published fields required from `tenants`, `agents`, and `models`; Runtime Gateway domain/application code imports no owning-context aggregates, repositories, ORM rows, or infrastructure. This is deliberate shared-schema coupling in the modular monolith. PostgreSQL foreign keys from `invocations` to all three records provide final referential protection without ORM relationships.
+
+The request supplies `ModelId` directly. Any Model belonging to the same Tenant is currently admissible; no Agent-to-Model assignment or implicit default has been invented. Missing resources and cross-tenant ownership mismatches use the same non-disclosing HTTP response. Only the `openai` provider is executable; other registered providers remain valid governance records but runtime rejects them explicitly.
+
+The OpenAI infrastructure adapter uses the current Responses API for one plain string input and reads provider-neutral `output_text`. It requests `store=false`, uses an environment-supplied credential and bounded timeout, and translates SDK/upstream failures without exposing raw details. SDK types do not cross the infrastructure boundary.
+
+Admission reads and the external provider call occur before opening the Invocation write Unit of Work. The handler constructs a final outcome, then opens a short database transaction, persists, and commits. Provider failures are recorded as final failed Invocations without output or raw exception details before a `502` response is produced. If recording itself fails, the persistence error takes precedence because VALOR cannot claim an audit record exists; no distributed transaction is attempted.
+
+This first slice persists raw input and successful output for retrieval/audit value but never logs them. The runtime API is unauthenticated. Retention, redaction, classification, encryption policy, and production access controls are explicit technical debt, and the endpoints must not be exposed to untrusted networks.
 
 ## Dependency and transaction rules
 

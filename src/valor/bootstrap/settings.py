@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, Field, PostgresDsn
+from pydantic import BaseModel, Field, PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,11 @@ class ObservabilitySettings(BaseModel):
     log_json: bool = True
 
 
+class ProviderSettings(BaseModel):
+    openai_api_key: SecretStr | None = None
+    timeout_seconds: float = Field(default=30, gt=0, le=300)
+
+
 class Settings(BaseSettings):
     """VALOR settings loaded once at the composition root."""
 
@@ -39,6 +44,7 @@ class Settings(BaseSettings):
     application: ApplicationSettings = ApplicationSettings()
     database: DatabaseSettings
     observability: ObservabilitySettings = ObservabilitySettings()
+    provider: ProviderSettings = ProviderSettings()
 
 
 @lru_cache

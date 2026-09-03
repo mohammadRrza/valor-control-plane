@@ -20,9 +20,19 @@ from valor.bootstrap.settings import Settings, get_settings
 from valor.identity_tenancy.infrastructure.unit_of_work import SqlAlchemyTenantUnitOfWork
 from valor.identity_tenancy.presentation.errors import install_identity_tenancy_error_handlers
 from valor.identity_tenancy.presentation.routes import router as tenant_router
+from valor.runtime_gateway.application.ports import ModelProviderPort
+from valor.runtime_gateway.infrastructure.admission import PostgresRuntimeAdmission
+from valor.runtime_gateway.infrastructure.openai_provider import OpenAIResponsesProvider
+from valor.runtime_gateway.infrastructure.unit_of_work import SqlAlchemyInvocationUnitOfWork
+from valor.runtime_gateway.presentation.errors import install_runtime_gateway_error_handlers
+from valor.runtime_gateway.presentation.routes import router as runtime_router
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    runtime_provider: ModelProviderPort | None = None,
+) -> FastAPI:
     resolved = settings or get_settings()
     configure_logging(resolved.observability)
 
@@ -36,6 +46,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.agent_unit_of_work_factory = partial(SqlAlchemyAgentUnitOfWork, database.sessions)
         app.state.model_unit_of_work_factory = partial(SqlAlchemyModelUnitOfWork, database.sessions)
         app.state.tenant_existence_factory = partial(PostgresTenantExistence, database.sessions)
+        app.state.invocation_unit_of_work_factory = partial(
+            SqlAlchemyInvocationUnitOfWork, database.sessions
+        )
+        app.state.runtime_admission = PostgresRuntimeAdmission(database.sessions)
+        api_key = resolved.provider.openai_api_key
+        api_key_value = api_key.get_secret_value() if api_key is not None else None
+        app.state.runtime_provider = runtime_provider or OpenAIResponsesProvider(
+            api_key_value or None,
+            timeout_seconds=resolved.provider.timeout_seconds,
+        )
         yield
         await database.close()
 
@@ -50,7 +70,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tenant_router, prefix="/api/v1")
     app.include_router(agent_router, prefix="/api/v1")
     app.include_router(model_router, prefix="/api/v1")
+    app.include_router(runtime_router, prefix="/api/v1")
     install_error_handlers(app)
     install_identity_tenancy_error_handlers(app)
     install_ai_asset_registry_error_handlers(app)
+    install_runtime_gateway_error_handlers(app)
     return app

@@ -6,11 +6,11 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 ## Status
 
-**Current phase: Phase 1 — Identity & Tenancy (in progress).**
+**Current phase: Phase 2 — Runtime Gateway (in progress).**
 
-Implemented: the Phase 0 engineering foundation; Tenant create/get; and AI Asset Registry Agent and governed Model reference register/get slices, with PostgreSQL persistence, explicit tenant ownership, and scoped normalized-name uniqueness.
+Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; and one synchronous Runtime Gateway text-invocation path through OpenAI with persisted succeeded/failed outcomes and Tenant/Agent/Model admission checks.
 
-Planned: the rest of Identity & Tenancy and AI Asset Registry, plus runtime routing, model/prompt/tool management, policy, evaluation, telemetry, FinOps, incident, and compliance capabilities. Neither implemented bounded context is complete.
+Planned: the remaining identity and asset capabilities, runtime routing and additional providers, model/prompt/tool management, policy, evaluation, telemetry, FinOps, incident, and compliance capabilities. No bounded context or LLM gateway is complete.
 
 Experimental: none.
 
@@ -28,6 +28,8 @@ cp .env.example .env
 uv sync --frozen
 uv run uvicorn valor.main:create_app --factory --reload
 ```
+
+Real OpenAI invocations require `VALOR_PROVIDER__OPENAI_API_KEY`. The adapter uses the OpenAI Responses API with a 30-second default timeout and requests `store=false`. Registry and health functionality can run without provider credentials; attempting an OpenAI runtime invocation without them returns a sanitized upstream-failure response.
 
 Useful commands:
 
@@ -51,6 +53,8 @@ POST /api/v1/agents
 GET  /api/v1/agents/{agent_id}
 POST /api/v1/models
 GET  /api/v1/models/{model_id}
+POST /api/v1/runtime/invocations
+GET  /api/v1/runtime/invocations/{invocation_id}
 ```
 
 ## Repository layout
@@ -70,6 +74,11 @@ src/valor/
     application/    CreateTenant and GetTenant use cases
     infrastructure/ SQLAlchemy mapping, repository, and UoW adapter
     presentation/   tenant HTTP contracts, routes, and error mapping
+  runtime_gateway/
+    domain/         Invocation identity, final status, and text invariants
+    application/    CreateInvocation/GetInvocation and narrow runtime ports
+    infrastructure/ PostgreSQL admission/persistence and OpenAI Responses adapter
+    presentation/   runtime HTTP contracts, routes, and error mappings
   infrastructure/  concrete adapters
   shared_kernel/   minimal framework-free primitives
 tests/             unit, integration, and architecture checks
@@ -81,6 +90,8 @@ docs/              architecture and decisions
 
 Never commit `.env`, secrets, tokens, credentials, or sensitive payloads. Logs must use allow-listed metadata and must not contain prompts or credentials. Treat migrations as reviewed production changes: provide reversible downgrades where safe and never edit an applied revision. Contributions should include proportionate tests, updated documentation, and pass every `make lint`, `make typecheck`, and `make test` check. Use Conventional Commit subjects (for example, `feat(identity): register tenant`) without adding commit tooling solely to enforce formatting.
 
-**Security status:** authentication and authorization are not implemented. Tenant, Agent, and Model management endpoints must not be exposed to untrusted networks in their current form. Model records are governance references only: they contain no provider credentials, connectivity, invocation behavior, or verification that a provider-side model exists.
+**Security status:** authentication and authorization are not implemented. Tenant, Agent, Model, and Runtime endpoints must not be exposed to untrusted networks. Model records remain governance references; OpenAI credentials come only from environment configuration and are not persisted or returned.
+
+Invocation input and output text are currently persisted for this first runtime/audit slice and returned by the Invocation API. Raw input/output and credentials are not logged. Redaction, retention, data classification, access controls, and encryption policy are not yet implemented, so this storage policy is not production-complete for sensitive workloads.
 
 The roadmap is documented in [ROADMAP.md](ROADMAP.md). VALOR is licensed under the [Apache License 2.0](LICENSE).
