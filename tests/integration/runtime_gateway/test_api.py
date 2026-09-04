@@ -12,6 +12,13 @@ from tests.integration.runtime_gateway.conftest import (
     DeterministicRuntimeProvider,
 )
 from valor.bootstrap.settings import RuntimeAuthenticationSettings, RuntimePrincipalSettings
+from valor.runtime_gateway.application.errors import UsageLimitUnavailable
+
+
+class FailingUsageReader:
+    async def consumed_total_units(self, **kwargs: object) -> int:
+        del kwargs
+        raise UsageLimitUnavailable
 
 
 def runtime_token(agent_id: UUID) -> str:
@@ -24,6 +31,8 @@ def configure_runtime_principal(
     agent_id: UUID,
     *,
     principal_id: str | None = None,
+    usage_limit: int = 10_000,
+    allowance: int = 100,
 ) -> None:
     app = cast(FastAPI, client.app)
     current = app.state.settings.runtime_auth.principals
@@ -32,9 +41,18 @@ def configure_runtime_principal(
         tenant_id=tenant_id,
         agent_id=agent_id,
         credential=runtime_token(agent_id),
+        usage_limit=usage_limit,
+        per_invocation_allowance=allowance,
     )
     app.state.settings.runtime_auth = RuntimeAuthenticationSettings(
-        principals=(*current, configured)
+        principals=(
+            *(
+                principal
+                for principal in current
+                if (principal.tenant_id, principal.agent_id) != (tenant_id, agent_id)
+            ),
+            configured,
+        )
     )
 
 
@@ -520,6 +538,83 @@ def test_create_then_get_invocation_with_deterministic_provider(
     assert retrieved.status_code == 200
     assert retrieved.json() == body
     assert body["policy_decision_id"]
+
+
+@pytest.mark.integration
+def test_daily_usage_limit_sequence_and_principal_isolation(
+    runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+) -> None:
+    tenant_a, agent_a, model_a = runtime_references(runtime_client)
+    configure_runtime_principal(runtime_client, tenant_a, agent_a, usage_limit=300, allowance=100)
+    set_permission(runtime_client, tenant_a, agent_a, model_a, "allow")
+    runtime_provider.usage_totals = [90, 110, 80]
+
+    for expected_total in (90, 110, 80):
+        response = runtime_client.post(
+            "/api/v1/runtime/invocations",
+            json=invocation_payload(model_a),
+            headers=runtime_headers(agent_a),
+        )
+        assert response.status_code == 201
+        assert response.json()["usage"]["total_units"] == expected_total
+
+    limited = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_a),
+        headers=runtime_headers(agent_a),
+    )
+    assert limited.status_code == 429
+    assert limited.json()["title"] == "Runtime Usage Limit Reached"
+    assert len(runtime_provider.calls) == 3
+    limited_id = limited.json()["invocation_id"]
+    retrieved = runtime_client.get(
+        f"/api/v1/runtime/invocations/{limited_id}", headers=runtime_headers(agent_a)
+    )
+    assert retrieved.status_code == 200
+    evidence = retrieved.json()
+    assert evidence["status"] == "limited"
+    assert evidence["usage_consumed_units"] == 280
+    assert evidence["usage_limit_units"] == 300
+    assert evidence["usage_allowance_units"] == 100
+    assert evidence["usage"] is None
+    assert evidence["provider_response_id"] is None
+
+    tenant_b = create_tenant(runtime_client, "Independent Usage Principal")
+    agent_b = create_agent(runtime_client, tenant_b, "Independent Agent")
+    model_b = create_model(runtime_client, tenant_b, "Independent Model")
+    configure_runtime_principal(runtime_client, tenant_b, agent_b, usage_limit=300, allowance=100)
+    set_permission(runtime_client, tenant_b, agent_b, model_b, "allow")
+    assert (
+        runtime_client.get(
+            f"/api/v1/runtime/invocations/{limited_id}", headers=runtime_headers(agent_b)
+        ).status_code
+        == 404
+    )
+    allowed_b = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_b),
+        headers=runtime_headers(agent_b),
+    )
+    assert allowed_b.status_code == 201
+
+
+@pytest.mark.integration
+def test_usage_reader_failure_returns_503_without_provider_execution(
+    runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
+    cast(FastAPI, runtime_client.app).state.runtime_usage_reader = FailingUsageReader()
+    response = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+    assert response.status_code == 503
+    assert response.json()["title"] == "Runtime Usage Check Unavailable"
+    assert runtime_provider.calls == []
 
 
 @pytest.mark.integration

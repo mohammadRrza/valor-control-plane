@@ -10,6 +10,11 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; static management authentication and Tenant authorization; separate static Runtime Principal authentication with Invocation read isolation; and persisted Invocation duration, normalized provider usage, and safe provider response correlation when available.
 
+Each Runtime Principal also requires an explicit UTC-daily total-unit limit and per-invocation
+allowance. After policy ALLOW, provider execution requires `known consumed total_units + allowance
+<= limit`. A rejection is persisted as a distinct `limited` Invocation and returned as 429. This
+provides deterministic sequential-request enforcement only; concurrent requests may overshoot.
+
 Planned: dynamic management grants, managed runtime credential rotation/revocation, richer conditional policy, human approval, tool/MCP governance, runtime routing and additional providers, evaluation, telemetry export/aggregation, FinOps, incident, and compliance capabilities. Cost calculation, budgets, rate limits, dashboards, alerts, tracing backends, and retention/redaction are not implemented. No bounded context, policy engine, identity platform, or LLM gateway is complete.
 
 Experimental: none.
@@ -27,7 +32,7 @@ cp .env.example .env
 # Supply a stable management principal ID, a long random token, and an explicit
 # JSON array of manageable Tenant UUIDs. An empty array grants no Tenant access.
 # After registering Agents, configure distinct runtime principals as a JSON array;
-# each entry binds principal_id, tenant_id, agent_id, and credential.
+# each entry binds identity and credential plus usage_limit and per_invocation_allowance.
 # Replace every example credential before any non-local use.
 uv sync --frozen
 uv run uvicorn valor.main:create_app --factory --reload

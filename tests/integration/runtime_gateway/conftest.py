@@ -24,14 +24,21 @@ class DeterministicRuntimeProvider:
     def __init__(self) -> None:
         self.fails = False
         self.calls: list[tuple[str, str]] = []
+        self.usage_totals: list[int] = []
 
     async def invoke(self, *, model_reference: str, input_text: str) -> ProviderInvocationResult:
         self.calls.append((model_reference, input_text))
         if self.fails:
             raise ProviderTransportError
+        total = self.usage_totals.pop(0) if self.usage_totals else None
+        usage = (
+            InvocationUsage(total // 2, total - total // 2, total)
+            if total is not None
+            else InvocationUsage(17, 9, 26)
+        )
         return ProviderInvocationResult(
             f"provider output for {input_text}",
-            InvocationUsage(17, 9, 26),
+            usage,
             "resp_deterministic_123",
         )
 

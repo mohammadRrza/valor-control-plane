@@ -31,4 +31,10 @@ def require_runtime_principal(
     if len(matches) != 1:
         raise RuntimeAuthenticationFailed
     matched = matches[0]
-    return RuntimePrincipal(matched.principal_id, matched.tenant_id, matched.agent_id)
+    return RuntimePrincipal(
+        matched.principal_id,
+        matched.tenant_id,
+        matched.agent_id,
+        matched.usage_limit,
+        matched.per_invocation_allowance,
+    )

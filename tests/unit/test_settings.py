@@ -36,7 +36,8 @@ def test_nested_environment_configuration(monkeypatch: pytest.MonkeyPatch) -> No
         "VALOR_RUNTIME_AUTH__PRINCIPALS",
         '[{"principal_id":"runtime-a","tenant_id":"11111111-1111-4111-8111-111111111111",'
         '"agent_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",'
-        '"credential":"runtime-test-secret-at-least-32-bytes"}]',
+        '"credential":"runtime-test-secret-at-least-32-bytes",'
+        '"usage_limit":1000,"per_invocation_allowance":100}]',
     )
     settings = Settings(_env_file=None)
     assert settings.application.environment == "staging"
@@ -85,6 +86,8 @@ def runtime_principal(
         tenant_id=UUID("11111111-1111-4111-8111-111111111111"),
         agent_id=UUID(agent_id),
         credential=credential,
+        usage_limit=1000,
+        per_invocation_allowance=100,
     )
 
 
@@ -132,3 +135,57 @@ def test_management_credential_cannot_be_configured_as_runtime_credential() -> N
                 )
             ),
         )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"usage_limit": 0},
+        {"usage_limit": -1},
+        {"per_invocation_allowance": 0},
+        {"per_invocation_allowance": -1},
+        {"usage_limit": 100, "per_invocation_allowance": 101},
+    ],
+)
+def test_invalid_runtime_usage_limit_configuration_fails(overrides: dict[str, int]) -> None:
+    values = {
+        "principal_id": "runtime-a",
+        "tenant_id": UUID("11111111-1111-4111-8111-111111111111"),
+        "agent_id": UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+        "credential": "runtime-credential-a-at-least-32-bytes",
+        "usage_limit": 1000,
+        "per_invocation_allowance": 100,
+    }
+    with pytest.raises(ValidationError):
+        RuntimePrincipalSettings.model_validate(values | overrides)
+
+
+def test_runtime_usage_limit_configuration_is_required() -> None:
+    with pytest.raises(ValidationError):
+        RuntimePrincipalSettings.model_validate(
+            {
+                "principal_id": "runtime-a",
+                "tenant_id": UUID("11111111-1111-4111-8111-111111111111"),
+                "agent_id": UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                "credential": "runtime-credential-a-at-least-32-bytes",
+            }
+        )
+
+
+def test_runtime_principals_have_independent_usage_limits() -> None:
+    first = runtime_principal(
+        "runtime-a",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "runtime-credential-a-at-least-32-bytes",
+    )
+    second = RuntimePrincipalSettings(
+        principal_id="runtime-b",
+        tenant_id=UUID("11111111-1111-4111-8111-111111111111"),
+        agent_id=UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+        credential="runtime-credential-b-at-least-32-bytes",
+        usage_limit=2000,
+        per_invocation_allowance=250,
+    )
+    configured = RuntimeAuthenticationSettings(principals=(first, second))
+    assert configured.principals[0].usage_limit == 1000
+    assert configured.principals[1].usage_limit == 2000

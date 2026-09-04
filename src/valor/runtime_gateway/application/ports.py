@@ -1,6 +1,7 @@
 """Runtime admission and model-provider ports."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -69,6 +70,16 @@ class RuntimePolicyDecisionPort(Protocol):
         agent_id: AgentId,
         model_id: ModelId,
     ) -> RuntimePolicyDecision: ...
+
+
+class RuntimeUsageReaderPort(Protocol):
+    async def consumed_total_units(
+        self,
+        *,
+        runtime_principal_id: str,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> int: ...
 
 
 class ProviderTransportError(Exception):

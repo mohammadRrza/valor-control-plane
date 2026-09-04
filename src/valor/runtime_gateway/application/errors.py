@@ -1,5 +1,7 @@
 """Protocol-independent Runtime Gateway application failures."""
 
+from datetime import datetime
+
 from valor.runtime_gateway.domain.identity import (
     AgentId,
     InvocationId,
@@ -49,3 +51,13 @@ class InvocationDenied(Exception):
     def __init__(self, invocation_id: InvocationId, decision_id: PolicyDecisionId) -> None:
         self.invocation_id = invocation_id
         self.decision_id = decision_id
+
+
+class InvocationUsageLimited(Exception):
+    def __init__(self, invocation_id: InvocationId, window_end: datetime) -> None:
+        self.invocation_id = invocation_id
+        self.window_end = window_end
+
+
+class UsageLimitUnavailable(Exception):
+    """The usage ledger could not be read safely."""

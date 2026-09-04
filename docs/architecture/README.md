@@ -126,6 +126,24 @@ but no fabricated usage or provider response ID. Nullable telemetry keeps legacy
 These persisted facts support later reliability and cost attribution, but there is no aggregation,
 exporter, tracing backend, dashboard, alerting, pricing, budget, quota, or rate enforcement.
 
+### Runtime Principal daily usage limit
+
+Every configured Runtime Principal carries a positive UTC-daily `usage_limit` and positive
+`per_invocation_allowance`. After resource validation and policy ALLOW, a narrow Runtime-owned
+reader executes one PostgreSQL aggregate over that principal's known `total_units`, using
+`started_at` in the half-open UTC calendar-day window. Provider execution requires `consumed +
+allowance <= limit`. Policy DENY remains independent and runs first.
+
+Limited attempts have explicit `limited` status, no provider telemetry, and a persisted snapshot of
+consumption, limit, allowance, and window. They return 429 and remain retrievable only by the same
+Runtime Principal. Invocation rows remain the sole usage ledger; no mutable counter exists. A
+database read failure fails closed. The aggregate read does not hold a transaction across provider
+I/O.
+
+This is sequential-request containment, not strict concurrent quota accounting. Concurrent calls
+may observe the same total and both proceed. Unknown provider usage cannot be counted, and actual
+usage may exceed the configured allowance because it is not a provider generation cap.
+
 ### Default-deny Agent-to-Model admission
 
 Policy & Risk owns one `AgentModelPermission` per Tenant/Agent/Model tuple. PUT atomically creates or replaces the current `ALLOW`/`DENY` effect while preserving PermissionId and creation time. There are no conditions, wildcards, inheritance, rule precedence, versions, assignments, RBAC/ABAC, or external policy engine.

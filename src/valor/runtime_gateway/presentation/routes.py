@@ -20,6 +20,7 @@ from valor.runtime_gateway.application.ports import (
     ModelProviderPort,
     ModelRuntimeLookupPort,
     RuntimePolicyDecisionPort,
+    RuntimeUsageReaderPort,
     TenantRuntimeLookupPort,
 )
 from valor.runtime_gateway.application.unit_of_work import InvocationUnitOfWork
@@ -60,6 +61,10 @@ def runtime_policy(request: Request) -> RuntimePolicyDecisionPort:
     return cast(RuntimePolicyDecisionPort, request.app.state.runtime_policy)
 
 
+def runtime_usage_reader(request: Request) -> RuntimeUsageReaderPort:
+    return cast(RuntimeUsageReaderPort, request.app.state.runtime_usage_reader)
+
+
 router = APIRouter(prefix="/runtime/invocations", tags=["runtime"])
 
 
@@ -74,11 +79,12 @@ async def create_invocation(
     ],
     provider: Annotated[ModelProviderPort, Depends(runtime_provider)],
     policy: Annotated[RuntimePolicyDecisionPort, Depends(runtime_policy)],
+    usage_reader: Annotated[RuntimeUsageReaderPort, Depends(runtime_usage_reader)],
     principal: Annotated[RuntimePrincipal, Depends(require_runtime_principal)],
 ) -> InvocationResponse:
     tenants, agents, models = admission
     invocation = await CreateInvocationHandler(
-        unit_of_work, tenants, agents, models, provider, policy
+        unit_of_work, tenants, agents, models, provider, policy, usage_reader
     )(
         CreateInvocationCommand(
             principal.principal_id,
@@ -86,6 +92,8 @@ async def create_invocation(
             AgentId(principal.agent_id),
             ModelId(payload.model_id),
             payload.input,
+            principal.usage_limit,
+            principal.per_invocation_allowance,
         )
     )
     response.headers["Location"] = f"/api/v1/runtime/invocations/{invocation.id.value}"

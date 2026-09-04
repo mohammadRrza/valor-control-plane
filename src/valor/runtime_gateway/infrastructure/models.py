@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from valor.infrastructure.sqlalchemy import SqlAlchemyBase
@@ -14,13 +14,37 @@ class InvocationRow(SqlAlchemyBase):
     __table_args__ = (
         CheckConstraint(
             "(status = 'succeeded' AND output_text IS NOT NULL) OR "
-            "(status IN ('failed', 'denied') AND output_text IS NULL)",
+            "(status IN ('failed', 'denied', 'limited') AND output_text IS NULL)",
             name="ck_invocations_status_output",
         ),
         CheckConstraint("duration_ms >= 0", name="ck_invocations_duration_non_negative"),
         CheckConstraint("input_units >= 0", name="ck_invocations_input_units_non_negative"),
         CheckConstraint("output_units >= 0", name="ck_invocations_output_units_non_negative"),
         CheckConstraint("total_units >= 0", name="ck_invocations_total_units_non_negative"),
+        CheckConstraint(
+            "usage_consumed_units >= 0", name="ck_invocations_usage_consumed_non_negative"
+        ),
+        CheckConstraint("usage_limit_units > 0", name="ck_invocations_usage_limit_positive"),
+        CheckConstraint(
+            "usage_allowance_units > 0", name="ck_invocations_usage_allowance_positive"
+        ),
+        CheckConstraint(
+            "(status = 'limited' AND usage_consumed_units IS NOT NULL "
+            "AND usage_limit_units IS NOT NULL AND usage_allowance_units IS NOT NULL "
+            "AND usage_window_start IS NOT NULL AND usage_window_end IS NOT NULL "
+            "AND usage_consumed_units + usage_allowance_units > usage_limit_units "
+            "AND usage_allowance_units <= usage_limit_units "
+            "AND total_units IS NULL AND provider_response_id IS NULL) OR "
+            "(status <> 'limited' AND usage_consumed_units IS NULL "
+            "AND usage_limit_units IS NULL AND usage_allowance_units IS NULL "
+            "AND usage_window_start IS NULL AND usage_window_end IS NULL)",
+            name="ck_invocations_limited_evidence",
+        ),
+        Index(
+            "ix_invocations_runtime_principal_started_at",
+            "runtime_principal_id",
+            "started_at",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -51,3 +75,12 @@ class InvocationRow(SqlAlchemyBase):
     output_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
     provider_response_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    usage_consumed_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    usage_limit_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    usage_allowance_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    usage_window_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    usage_window_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

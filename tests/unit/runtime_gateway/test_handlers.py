@@ -13,10 +13,12 @@ from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
     InvocationDenied,
     InvocationNotFound,
+    InvocationUsageLimited,
     ModelNotAvailable,
     ProviderInvocationFailed,
     ProviderNotSupportedForRuntime,
     TenantNotAvailable,
+    UsageLimitUnavailable,
 )
 from valor.runtime_gateway.application.get_invocation import (
     GetInvocationHandler,
@@ -129,10 +131,17 @@ class AdmissionStub:
 
 
 class ProviderStub:
-    def __init__(self, *, fails: bool = False, events: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fails: bool = False,
+        events: list[str] | None = None,
+        total_units: int = 20,
+    ) -> None:
         self.fails = fails
         self.calls: list[tuple[str, str]] = []
         self.events = events
+        self.total_units = total_units
 
     async def invoke(self, *, model_reference: str, input_text: str) -> ProviderInvocationResult:
         self.calls.append((model_reference, input_text))
@@ -141,7 +150,9 @@ class ProviderStub:
         if self.fails:
             raise ProviderTransportError
         return ProviderInvocationResult(
-            "deterministic output", InvocationUsage(12, 8, 20), "provider-response-1"
+            "deterministic output",
+            InvocationUsage(12, self.total_units - 12, self.total_units),
+            "provider-response-1",
         )
 
 
@@ -166,12 +177,38 @@ class PolicyStub:
         return RuntimePolicyDecision(DECISION_ID, self.effect, None)
 
 
+class UsageReaderStub:
+    def __init__(
+        self, consumed: int = 0, *, events: list[str] | None = None, fails: bool = False
+    ) -> None:
+        self.consumed = consumed
+        self.events = events
+        self.calls = 0
+        self.fails = fails
+
+    async def consumed_total_units(
+        self,
+        *,
+        runtime_principal_id: str,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> int:
+        del runtime_principal_id, window_start, window_end
+        self.calls += 1
+        if self.events is not None:
+            self.events.append("usage")
+        if self.fails:
+            raise UsageLimitUnavailable
+        return self.consumed
+
+
 def handler(
     unit_of_work: RecordingInvocationUnitOfWork,
     admission: AdmissionStub,
     provider: ProviderStub,
     policy: PolicyStub | None = None,
     events: list[str] | None = None,
+    usage_reader: UsageReaderStub | None = None,
 ) -> CreateInvocationHandler:
     times = iter((STARTED_AT, COMPLETED_AT))
 
@@ -188,6 +225,7 @@ def handler(
         admission,
         provider,
         policy or PolicyStub(),
+        usage_reader or UsageReaderStub(events=events),
         id_factory=lambda: INVOCATION_UUID,
         clock=clock,
     )
@@ -195,7 +233,7 @@ def handler(
 
 def command() -> CreateInvocationCommand:
     return CreateInvocationCommand(
-        "runtime-principal", TENANT_ID, AGENT_ID, MODEL_ID, " explain zero trust "
+        "runtime-principal", TENANT_ID, AGENT_ID, MODEL_ID, " explain zero trust ", 1000, 100
     )
 
 
@@ -241,6 +279,7 @@ async def test_all_final_outcomes_measure_from_application_processing_start(
     assert events[1:5] == ["tenant", "agent", "model", "policy"]
     assert events[-1] == "clock:complete"
     assert ("provider" in events) is (outcome != "denied")
+    assert ("usage" in events) is (outcome != "denied")
     invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
     assert invocation.duration_ms == 1_000
 
@@ -319,6 +358,53 @@ async def test_provider_failure_is_recorded_then_translated() -> None:
 
 
 @pytest.mark.asyncio
+async def test_over_limit_persists_limited_evidence_without_provider() -> None:
+    unit_of_work = RecordingInvocationUnitOfWork()
+    provider = ProviderStub()
+    usage_reader = UsageReaderStub(901)
+    with pytest.raises(InvocationUsageLimited):
+        await handler(unit_of_work, AdmissionStub(), provider, usage_reader=usage_reader)(command())
+    invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
+    assert invocation.status is InvocationStatus.LIMITED
+    assert invocation.usage_consumed_units == 901
+    assert invocation.usage_limit_units == 1000
+    assert invocation.usage_allowance_units == 100
+    assert invocation.usage is None and invocation.provider_response_id is None
+    assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_usage_reader_failure_fails_closed_before_provider() -> None:
+    unit_of_work = RecordingInvocationUnitOfWork()
+    provider = ProviderStub()
+    with pytest.raises(UsageLimitUnavailable):
+        await handler(
+            unit_of_work,
+            AdmissionStub(),
+            provider,
+            usage_reader=UsageReaderStub(fails=True),
+        )(command())
+    assert provider.calls == []
+    assert unit_of_work.entered == 0
+
+
+@pytest.mark.asyncio
+async def test_actual_usage_above_allowance_is_preserved_and_next_check_denies() -> None:
+    unit_of_work = RecordingInvocationUnitOfWork()
+    provider = ProviderStub(total_units=250)
+    first = await handler(
+        unit_of_work, AdmissionStub(), provider, usage_reader=UsageReaderStub(800)
+    )(command())
+    assert first.usage is not None and first.usage.total_units == 250
+
+    with pytest.raises(InvocationUsageLimited):
+        await handler(unit_of_work, AdmissionStub(), provider, usage_reader=UsageReaderStub(1050))(
+            command()
+        )
+    assert len(provider.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_get_invocation_returns_record_without_commit() -> None:
     repository = InMemoryInvocationRepository()
     invocation = Invocation.failed(
@@ -345,8 +431,11 @@ async def test_policy_deny_records_denied_invocation_without_provider(effect: st
     unit_of_work = RecordingInvocationUnitOfWork()
     provider = ProviderStub()
     policy = PolicyStub(effect)
+    usage_reader = UsageReaderStub()
     with pytest.raises(InvocationDenied) as error:
-        await handler(unit_of_work, AdmissionStub(), provider, policy)(command())
+        await handler(unit_of_work, AdmissionStub(), provider, policy, usage_reader=usage_reader)(
+            command()
+        )
     invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
     assert invocation.status is InvocationStatus.DENIED
     assert invocation.policy_decision_id == DECISION_ID
@@ -355,6 +444,7 @@ async def test_policy_deny_records_denied_invocation_without_provider(effect: st
     assert invocation.provider_response_id is None
     assert error.value.decision_id == DECISION_ID
     assert provider.calls == []
+    assert usage_reader.calls == 0
     assert unit_of_work.commits == 1
 
 

@@ -15,3 +15,4 @@ ADRs record decisions at the time they are made. Supersede rather than silently 
 - [ADR-0011](0011-tenant-scoped-management-authorization.md) — fail-closed Tenant-scoped management authorization
 - [ADR-0012](0012-separate-runtime-principal-authentication.md) — separate runtime workload authentication
 - [ADR-0013](0013-persist-provider-neutral-invocation-usage.md) — persisted provider-neutral Invocation usage
+- [ADR-0014](0014-utc-daily-runtime-principal-usage-limit.md) — UTC daily Runtime Principal usage pre-check

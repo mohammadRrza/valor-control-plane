@@ -49,6 +49,11 @@ class SqlAlchemyInvocationRepository:
                 output_units=invocation.usage.output_units if invocation.usage else None,
                 total_units=invocation.usage.total_units if invocation.usage else None,
                 provider_response_id=invocation.provider_response_id,
+                usage_consumed_units=invocation.usage_consumed_units,
+                usage_limit_units=invocation.usage_limit_units,
+                usage_allowance_units=invocation.usage_allowance_units,
+                usage_window_start=invocation.usage_window_start,
+                usage_window_end=invocation.usage_window_end,
             )
         )
         try:
@@ -87,6 +92,11 @@ class SqlAlchemyInvocationRepository:
             row.duration_ms,
             _usage_from_row(row),
             row.provider_response_id,
+            row.usage_consumed_units,
+            row.usage_limit_units,
+            row.usage_allowance_units,
+            row.usage_window_start,
+            row.usage_window_end,
         )
 
 

@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
     InvocationDenied,
+    InvocationUsageLimited,
     ModelNotAvailable,
     ProviderInvocationFailed,
     ProviderNotSupportedForRuntime,
@@ -19,11 +20,13 @@ from valor.runtime_gateway.application.ports import (
     ModelRuntimeLookupPort,
     ProviderTransportError,
     RuntimePolicyDecisionPort,
+    RuntimeUsageReaderPort,
     TenantRuntimeLookupPort,
 )
 from valor.runtime_gateway.application.unit_of_work import InvocationUnitOfWork
 from valor.runtime_gateway.domain.identity import AgentId, InvocationId, ModelId, TenantId
 from valor.runtime_gateway.domain.invocation import Invocation, validated_input
+from valor.runtime_gateway.domain.usage_limit import decide_usage_limit, utc_day_window
 
 
 def utc_now() -> datetime:
@@ -37,6 +40,8 @@ class CreateInvocationCommand:
     agent_id: AgentId
     model_id: ModelId
     input_text: str
+    usage_limit: int
+    per_invocation_allowance: int
 
 
 class CreateInvocationHandler:
@@ -48,6 +53,7 @@ class CreateInvocationHandler:
         models: ModelRuntimeLookupPort,
         openai_provider: ModelProviderPort,
         policy: RuntimePolicyDecisionPort,
+        usage_reader: RuntimeUsageReaderPort,
         *,
         id_factory: Callable[[], UUID] = uuid4,
         clock: Callable[[], datetime] = utc_now,
@@ -58,6 +64,7 @@ class CreateInvocationHandler:
         self._models = models
         self._openai_provider = openai_provider
         self._policy = policy
+        self._usage_reader = usage_reader
         self._id_factory = id_factory
         self._clock = clock
 
@@ -96,6 +103,37 @@ class CreateInvocationHandler:
             )
             await self._persist(denied)
             raise InvocationDenied(invocation_id, decision.id)
+        window = utc_day_window(started_at)
+        consumed = await self._usage_reader.consumed_total_units(
+            runtime_principal_id=command.runtime_principal_id,
+            window_start=window.start,
+            window_end=window.end,
+        )
+        usage_decision = decide_usage_limit(
+            consumed_units=consumed,
+            limit_units=command.usage_limit,
+            allowance_units=command.per_invocation_allowance,
+            window=window,
+        )
+        if not usage_decision.allowed:
+            limited = Invocation.limited(
+                invocation_id,
+                command.tenant_id,
+                command.agent_id,
+                command.model_id,
+                input_text,
+                started_at,
+                self._clock(),
+                decision.id,
+                command.runtime_principal_id,
+                consumed_units=usage_decision.consumed_units,
+                limit_units=usage_decision.limit_units,
+                allowance_units=usage_decision.allowance_units,
+                window_start=usage_decision.window.start,
+                window_end=usage_decision.window.end,
+            )
+            await self._persist(limited)
+            raise InvocationUsageLimited(invocation_id, window.end)
         try:
             result = await self._openai_provider.invoke(
                 model_reference=model.provider_model_reference,

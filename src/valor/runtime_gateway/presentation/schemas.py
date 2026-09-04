@@ -45,6 +45,11 @@ class InvocationResponse(BaseModel):
     duration_ms: int | None
     usage: InvocationUsageResponse | None
     provider_response_id: str | None
+    usage_consumed_units: int | None
+    usage_limit_units: int | None
+    usage_allowance_units: int | None
+    usage_window_start: datetime | None
+    usage_window_end: datetime | None
 
     @classmethod
     def from_domain(cls, invocation: Invocation) -> "InvocationResponse":
@@ -65,4 +70,9 @@ class InvocationResponse(BaseModel):
                 InvocationUsageResponse.from_domain(invocation.usage) if invocation.usage else None
             ),
             provider_response_id=invocation.provider_response_id,
+            usage_consumed_units=invocation.usage_consumed_units,
+            usage_limit_units=invocation.usage_limit_units,
+            usage_allowance_units=invocation.usage_allowance_units,
+            usage_window_start=invocation.usage_window_start,
+            usage_window_end=invocation.usage_window_end,
         )

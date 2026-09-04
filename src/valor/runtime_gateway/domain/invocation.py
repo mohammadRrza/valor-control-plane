@@ -22,6 +22,7 @@ class InvocationStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     DENIED = "denied"
+    LIMITED = "limited"
 
 
 def validated_input(value: str) -> str:
@@ -51,6 +52,11 @@ class Invocation:
     duration_ms: int | None = None
     usage: InvocationUsage | None = None
     provider_response_id: str | None = None
+    usage_consumed_units: int | None = None
+    usage_limit_units: int | None = None
+    usage_allowance_units: int | None = None
+    usage_window_start: datetime | None = None
+    usage_window_end: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "input_text", validated_input(self.input_text))
@@ -79,7 +85,42 @@ class Invocation:
             if self.output_text is None or not self.output_text.strip():
                 raise InvalidInvocationOutput("A succeeded Invocation requires text output.")
         elif self.output_text is not None:
-            raise InvalidInvocationOutput("A failed or denied Invocation must not retain output.")
+            raise InvalidInvocationOutput(
+                "A failed, denied, or limited Invocation must not retain output."
+            )
+        evidence = (
+            self.usage_consumed_units,
+            self.usage_limit_units,
+            self.usage_allowance_units,
+            self.usage_window_start,
+            self.usage_window_end,
+        )
+        if self.status is InvocationStatus.LIMITED:
+            if (
+                self.usage_consumed_units is None
+                or self.usage_limit_units is None
+                or self.usage_allowance_units is None
+                or self.usage_window_start is None
+                or self.usage_window_end is None
+            ):
+                raise ValueError("A limited Invocation requires usage-limit evidence.")
+            if self.usage is not None or self.provider_response_id is not None:
+                raise ValueError("A limited Invocation cannot contain provider telemetry.")
+            if (
+                self.usage_consumed_units < 0
+                or self.usage_limit_units <= 0
+                or self.usage_allowance_units <= 0
+                or self.usage_allowance_units > self.usage_limit_units
+                or self.usage_consumed_units + self.usage_allowance_units <= self.usage_limit_units
+            ):
+                raise ValueError("Limited Invocation usage evidence is inconsistent.")
+            for timestamp in (self.usage_window_start, self.usage_window_end):
+                if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                    raise ValueError("Usage-limit window must be timezone-aware.")
+            if self.usage_window_end <= self.usage_window_start:
+                raise ValueError("Usage-limit window end must follow its start.")
+        elif any(value is not None for value in evidence):
+            raise ValueError("Usage-limit evidence belongs only to a limited Invocation.")
 
     @classmethod
     def succeeded(
@@ -168,6 +209,47 @@ class Invocation:
             policy_decision_id,
             runtime_principal_id,
             _duration_ms(started_at, completed_at),
+        )
+
+    @classmethod
+    def limited(
+        cls,
+        invocation_id: InvocationId,
+        tenant_id: TenantId,
+        agent_id: AgentId,
+        model_id: ModelId,
+        input_text: str,
+        started_at: datetime,
+        completed_at: datetime,
+        policy_decision_id: PolicyDecisionId,
+        runtime_principal_id: str,
+        *,
+        consumed_units: int,
+        limit_units: int,
+        allowance_units: int,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> "Invocation":
+        return cls(
+            invocation_id,
+            tenant_id,
+            agent_id,
+            model_id,
+            InvocationStatus.LIMITED,
+            input_text,
+            None,
+            started_at,
+            completed_at,
+            policy_decision_id,
+            runtime_principal_id,
+            _duration_ms(started_at, completed_at),
+            None,
+            None,
+            consumed_units,
+            limit_units,
+            allowance_units,
+            window_start,
+            window_end,
         )
 
 

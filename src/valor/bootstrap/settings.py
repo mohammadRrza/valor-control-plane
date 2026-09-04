@@ -56,6 +56,14 @@ class RuntimePrincipalSettings(BaseModel):
     tenant_id: UUID
     agent_id: UUID
     credential: SecretStr = Field(min_length=32)
+    usage_limit: int = Field(gt=0)
+    per_invocation_allowance: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def allowance_must_fit_limit(self) -> "RuntimePrincipalSettings":
+        if self.per_invocation_allowance > self.usage_limit:
+            raise ValueError("Runtime principal allowance must not exceed its usage limit.")
+        return self
 
 
 class RuntimeAuthenticationSettings(BaseModel):

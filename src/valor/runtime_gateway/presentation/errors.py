@@ -8,10 +8,12 @@ from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
     InvocationDenied,
     InvocationNotFound,
+    InvocationUsageLimited,
     ModelNotAvailable,
     ProviderInvocationFailed,
     ProviderNotSupportedForRuntime,
     TenantNotAvailable,
+    UsageLimitUnavailable,
 )
 from valor.runtime_gateway.domain.errors import InvalidInvocationInput
 
@@ -89,4 +91,25 @@ def install_runtime_gateway_error_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The requested invocation is not permitted.",
             decision_id=exc.decision_id.value,
+        )
+
+    @app.exception_handler(InvocationUsageLimited)
+    async def invocation_limited(request: Request, exc: InvocationUsageLimited) -> JSONResponse:
+        return problem_response(
+            request,
+            title="Runtime Usage Limit Reached",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Runtime usage allowance for the current UTC day has been exhausted.",
+            invocation_id=exc.invocation_id.value,
+            window_end=exc.window_end,
+        )
+
+    @app.exception_handler(UsageLimitUnavailable)
+    async def usage_limit_unavailable(request: Request, exc: UsageLimitUnavailable) -> JSONResponse:
+        del exc
+        return problem_response(
+            request,
+            title="Runtime Usage Check Unavailable",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Runtime usage could not be verified safely.",
         )

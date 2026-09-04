@@ -38,6 +38,8 @@ def runtime_authentication_client() -> TestClient:
                     tenant_id=TENANT_ID,
                     agent_id=AGENT_ID,
                     credential=RUNTIME_TOKEN,
+                    usage_limit=1000,
+                    per_invocation_allowance=100,
                 ),
             )
         ),
@@ -46,11 +48,13 @@ def runtime_authentication_client() -> TestClient:
     @app.get("/runtime")
     def runtime(
         principal: Annotated[RuntimePrincipal, Depends(require_runtime_principal)],
-    ) -> dict[str, str]:
+    ) -> dict[str, str | int]:
         return {
             "principal_id": principal.principal_id,
             "tenant_id": str(principal.tenant_id),
             "agent_id": str(principal.agent_id),
+            "usage_limit": principal.usage_limit,
+            "per_invocation_allowance": principal.per_invocation_allowance,
         }
 
     install_security_error_handlers(app)
@@ -68,6 +72,8 @@ def test_runtime_credential_resolves_bound_non_secret_identity(
         "principal_id": "runtime-agent-a",
         "tenant_id": str(TENANT_ID),
         "agent_id": str(AGENT_ID),
+        "usage_limit": 1000,
+        "per_invocation_allowance": 100,
     }
     assert RUNTIME_TOKEN not in response.text
 
@@ -89,11 +95,11 @@ def test_runtime_authentication_failures_are_sanitized(
 
 
 def test_runtime_principal_contains_no_credential() -> None:
-    principal = RuntimePrincipal("runtime-agent-a", TENANT_ID, AGENT_ID)
+    principal = RuntimePrincipal("runtime-agent-a", TENANT_ID, AGENT_ID, 1000, 100)
     assert not hasattr(principal, "credential")
     assert RUNTIME_TOKEN not in repr(principal)
 
 
 def test_runtime_principal_identity_cannot_be_empty() -> None:
     with pytest.raises(ValueError, match="principal_id must not be empty"):
-        RuntimePrincipal(" ", TENANT_ID, AGENT_ID)
+        RuntimePrincipal(" ", TENANT_ID, AGENT_ID, 1000, 100)

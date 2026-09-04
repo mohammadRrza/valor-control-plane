@@ -82,10 +82,13 @@ Implemented controls:
 - the OpenAI request sets `store=false`.
 - provider usage and response identity are allow-listed and normalized before persistence;
 - raw SDK responses, arbitrary metadata, headers, credentials, and provider errors are not persisted.
+- policy-allowed provider execution is guarded by a fail-closed UTC-daily Runtime Principal
+  total-unit pre-check using persisted known usage.
 
-Residual threats include credential theft, provider outage, malicious output, latency, unbounded
-usage, and cost abuse. Usage attribution now improves investigation and future cost analysis, but
-there are no per-principal limits, quotas, budgets, automatic blocking, or monetary calculations.
+Residual threats include credential theft, provider outage, malicious output, latency, concurrent
+usage-limit overshoot, unknown consumption when provider telemetry is absent, and cost abuse. The
+sequential per-principal limit improves basic containment, but there are no request-rate limits,
+tenant budgets, automatic credential revocation, alerting, or monetary calculations.
 
 ### Application to PostgreSQL
 
@@ -117,7 +120,7 @@ have no durable management actor record, and lack of permission history or appro
 | Information disclosure | Cross-principal Runtime GET reveals prompt/response | Exact principal/Tenant/Agent correlation and non-disclosing 404 | Mitigated; stored-data risk remains High/Medium | Retention, redaction, encryption policy |
 | Information disclosure | Database/backup reveals prompt/response | Infrastructure access boundary | High/Medium | Retention, redaction, classification, encryption policy |
 | Denial of service | Runtime exhausts connections/provider capacity | Provider timeout | High/Medium | Identity-aware limits and concurrency controls |
-| Cost abuse | Stolen runtime credential incurs provider spend | Runtime authentication plus default-deny model policy | High/Medium | Rotation, rate limits, quotas/budgets |
+| Cost abuse | Stolen runtime credential incurs provider spend | Authentication, default-deny policy, sequential UTC-daily usage pre-check | Medium; concurrent/unknown usage remains | Rotation, reservations, rate limits, tenant budgets |
 | Repudiation | Provider execution cannot be correlated during support investigation | Safe provider response ID persisted when available | Medium/Low | Managed tracing and retention policy |
 | Elevation of privilege | Caller claims a more privileged Agent | Request identity removed; credential binds exact Tenant/Agent | Mitigated; stolen credential remains High | Managed workload identity lifecycle |
 
@@ -151,7 +154,7 @@ Material gaps:
 
 1. Static runtime credential lifecycle, theft, replay, rotation, and revocation — High.
 2. Sensitive Invocation data retention/redaction policy — High/Medium.
-3. Identity-aware rate, concurrency, and budget controls — Medium; observability does not enforce them.
+3. Concurrency-safe reservations, request-rate limits, and tenant budgets — Medium.
 4. Individual management accountability and policy-change audit — Medium.
 
 ## Recommended sequence

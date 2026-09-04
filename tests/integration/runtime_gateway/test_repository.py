@@ -54,6 +54,7 @@ from valor.runtime_gateway.domain.invocation import Invocation
 from valor.runtime_gateway.domain.usage import InvocationUsage
 from valor.runtime_gateway.infrastructure.admission import PostgresRuntimeAdmission
 from valor.runtime_gateway.infrastructure.unit_of_work import SqlAlchemyInvocationUnitOfWork
+from valor.runtime_gateway.infrastructure.usage_reader import PostgresRuntimeUsageReader
 
 TENANT_UUID = UUID("11111111-1111-4111-8111-111111111111")
 AGENT_UUID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
@@ -273,4 +274,66 @@ async def test_runtime_admission_reads_only_required_projections(
     assert model is not None and model.tenant_id == TenantId(TENANT_UUID)
     assert model.provider == "openai"
     assert model.provider_model_reference == "gpt-test"
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_usage_reader_aggregates_only_principal_utc_window_known_usage(
+    runtime_database_url: str,
+) -> None:
+    sessions, engine = sessions_for(runtime_database_url)
+    await persist_runtime_references(sessions)
+    current_start = datetime(2026, 2, 3, tzinfo=UTC)
+    rows = [
+        ("10000000-0000-4000-8000-000000000001", "principal-a", current_start, 30),
+        ("10000000-0000-4000-8000-000000000002", "principal-a", current_start, 40),
+        (
+            "10000000-0000-4000-8000-000000000003",
+            "principal-a",
+            current_start - timedelta(minutes=1),
+            900,
+        ),
+        ("10000000-0000-4000-8000-000000000004", "principal-b", current_start, 50),
+        ("10000000-0000-4000-8000-000000000005", "principal-a", current_start, None),
+    ]
+    async with engine.begin() as connection:
+        for invocation_id, principal_id, started_at, total_units in rows:
+            await connection.execute(
+                text(
+                    "INSERT INTO invocations "
+                    "(id, tenant_id, agent_id, model_id, status, input_text, output_text, "
+                    "started_at, completed_at, policy_decision_id, runtime_principal_id, "
+                    "duration_ms, total_units) VALUES "
+                    "(:id, :tenant, :agent, :model, 'succeeded', 'input', 'output', "
+                    ":started, :started, :decision, :principal, 0, :total)"
+                ),
+                {
+                    "id": UUID(invocation_id),
+                    "tenant": TENANT_UUID,
+                    "agent": AGENT_UUID,
+                    "model": MODEL_UUID,
+                    "started": started_at,
+                    "decision": DECISION_UUID,
+                    "principal": principal_id,
+                    "total": total_units,
+                },
+            )
+    reader = PostgresRuntimeUsageReader(sessions)
+    assert (
+        await reader.consumed_total_units(
+            runtime_principal_id="principal-a",
+            window_start=current_start,
+            window_end=current_start + timedelta(days=1),
+        )
+        == 70
+    )
+    assert (
+        await reader.consumed_total_units(
+            runtime_principal_id="principal-b",
+            window_start=current_start,
+            window_end=current_start + timedelta(days=1),
+        )
+        == 50
+    )
     await engine.dispose()
