@@ -1,9 +1,10 @@
 """SQLAlchemy persistence representation for completed Invocations."""
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from valor.infrastructure.sqlalchemy import SqlAlchemyBase
@@ -45,6 +46,17 @@ class InvocationRow(SqlAlchemyBase):
             "runtime_principal_id",
             "started_at",
         ),
+        CheckConstraint(
+            "(cost_currency IS NULL AND cost_input IS NULL AND cost_output IS NULL "
+            "AND cost_total IS NULL AND pricing_version IS NULL "
+            "AND pricing_basis_units IS NULL AND pricing_input_rate IS NULL "
+            "AND pricing_output_rate IS NULL) OR "
+            "(cost_currency = 'USD' AND cost_input >= 0 AND cost_output >= 0 "
+            "AND cost_total = cost_input + cost_output AND pricing_version IS NOT NULL "
+            "AND pricing_basis_units > 0 AND pricing_input_rate >= 0 "
+            "AND pricing_output_rate >= 0)",
+            name="ck_invocations_cost_snapshot_complete",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -84,3 +96,11 @@ class InvocationRow(SqlAlchemyBase):
     usage_window_end: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    cost_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    cost_input: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    cost_output: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    cost_total: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    pricing_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pricing_basis_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pricing_input_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 12), nullable=True)
+    pricing_output_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 12), nullable=True)

@@ -11,8 +11,14 @@ from tests.integration.runtime_gateway.conftest import (
     TEST_MANAGEMENT_TOKEN,
     DeterministicRuntimeProvider,
 )
-from valor.bootstrap.settings import RuntimeAuthenticationSettings, RuntimePrincipalSettings
+from valor.bootstrap.settings import (
+    PricingEntrySettings,
+    PricingSettings,
+    RuntimeAuthenticationSettings,
+    RuntimePrincipalSettings,
+)
 from valor.runtime_gateway.application.errors import UsageLimitUnavailable
+from valor.runtime_gateway.infrastructure.pricing import ConfiguredInvocationPricing
 
 
 class FailingUsageReader:
@@ -58,6 +64,24 @@ def configure_runtime_principal(
 
 def runtime_headers(agent_id: UUID) -> dict[str, str]:
     return {"Authorization": f"Bearer {runtime_token(agent_id)}"}
+
+
+def configure_pricing(
+    client: TestClient, *, version: str, input_rate: str, output_rate: str
+) -> None:
+    settings = PricingSettings(
+        entries=(
+            PricingEntrySettings(
+                provider="openai",
+                provider_model_reference="gpt-test",
+                pricing_version=version,
+                price_basis_units=1_000_000,
+                input_price_per_basis=input_rate,
+                output_price_per_basis=output_rate,
+            ),
+        )
+    )
+    cast(FastAPI, client.app).state.invocation_pricing = ConfiguredInvocationPricing(settings)
 
 
 def create_tenant(client: TestClient, name: str) -> UUID:
@@ -529,6 +553,7 @@ def test_create_then_get_invocation_with_deterministic_provider(
         "total_units": 26,
     }
     assert body["provider_response_id"] == "resp_deterministic_123"
+    assert body["estimated_cost"] is None
     assert created.headers["location"] == (f"/api/v1/runtime/invocations/{body['invocation_id']}")
     assert runtime_provider.calls == [("gpt-test", "Explain zero trust.")]
     retrieved = runtime_client.get(
@@ -538,6 +563,56 @@ def test_create_then_get_invocation_with_deterministic_provider(
     assert retrieved.status_code == 200
     assert retrieved.json() == body
     assert body["policy_decision_id"]
+
+
+@pytest.mark.integration
+def test_cost_snapshot_is_exact_and_stable_after_pricing_change(
+    runtime_client: TestClient,
+) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
+    configure_pricing(runtime_client, version="synthetic-v1", input_rate="2", output_rate="8")
+    created = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+    assert created.status_code == 201
+    expected = {
+        "currency": "USD",
+        "input": "0.000034000000",
+        "output": "0.000072000000",
+        "total": "0.000106000000",
+        "pricing_version": "synthetic-v1",
+    }
+    assert created.json()["estimated_cost"] == expected
+
+    configure_pricing(runtime_client, version="synthetic-v2", input_rate="20", output_rate="80")
+    retrieved = runtime_client.get(
+        f"/api/v1/runtime/invocations/{created.json()['invocation_id']}",
+        headers=runtime_headers(agent_id),
+    )
+    assert retrieved.status_code == 200
+    assert retrieved.json()["estimated_cost"] == expected
+
+
+@pytest.mark.integration
+def test_missing_provider_usage_keeps_successful_invocation_cost_unavailable(
+    runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
+    configure_pricing(runtime_client, version="synthetic-v1", input_rate="2", output_rate="8")
+    runtime_provider.usage_available = False
+    response = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+    assert response.status_code == 201
+    assert response.json()["usage"] is None
+    assert response.json()["estimated_cost"] is None
 
 
 @pytest.mark.integration
@@ -579,6 +654,7 @@ def test_daily_usage_limit_sequence_and_principal_isolation(
     assert evidence["usage_allowance_units"] == 100
     assert evidence["usage"] is None
     assert evidence["provider_response_id"] is None
+    assert evidence["estimated_cost"] is None
 
     tenant_b = create_tenant(runtime_client, "Independent Usage Principal")
     agent_b = create_agent(runtime_client, tenant_b, "Independent Agent")
@@ -761,7 +837,7 @@ async def test_provider_failure_returns_bad_gateway_and_persists_failed_invocati
                 text(
                     "SELECT i.status, i.output_text, i.input_text, i.duration_ms, "
                     "i.input_units, i.output_units, i.total_units, "
-                    "i.provider_response_id, d.effect, "
+                    "i.provider_response_id, i.cost_total, d.effect, "
                     "i.policy_decision_id = d.id AS linked "
                     "FROM invocations i JOIN policy_decisions d "
                     "ON d.invocation_id = i.id "
@@ -776,6 +852,7 @@ async def test_provider_failure_returns_bad_gateway_and_persists_failed_invocati
     assert row.duration_ms >= 0
     assert row.input_units is row.output_units is row.total_units is None
     assert row.provider_response_id is None
+    assert row.cost_total is None
     assert row.effect == "allow"
     assert row.linked is True
     await engine.dispose()
@@ -808,7 +885,7 @@ async def test_default_and_explicit_deny_never_call_provider(
             await connection.execute(
                 text(
                     "SELECT i.status, i.duration_ms, i.input_units, i.output_units, "
-                    "i.total_units, i.provider_response_id, "
+                    "i.total_units, i.provider_response_id, i.cost_total, "
                     "i.policy_decision_id = d.id AS linked, "
                     "d.permission_id FROM invocations i JOIN policy_decisions d "
                     "ON d.invocation_id = i.id WHERE i.tenant_id = :tenant_id"
@@ -820,6 +897,7 @@ async def test_default_and_explicit_deny_never_call_provider(
     assert row.duration_ms >= 0
     assert row.input_units is row.output_units is row.total_units is None
     assert row.provider_response_id is None
+    assert row.cost_total is None
     assert row.linked is True
     assert (row.permission_id is not None) is explicit
     await engine.dispose()

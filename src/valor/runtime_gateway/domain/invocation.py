@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from valor.runtime_gateway.domain.cost import InvocationCost
 from valor.runtime_gateway.domain.errors import InvalidInvocationInput, InvalidInvocationOutput
 from valor.runtime_gateway.domain.identity import (
     AgentId,
@@ -57,6 +58,7 @@ class Invocation:
     usage_allowance_units: int | None = None
     usage_window_start: datetime | None = None
     usage_window_end: datetime | None = None
+    estimated_cost: InvocationCost | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "input_text", validated_input(self.input_text))
@@ -121,6 +123,15 @@ class Invocation:
                 raise ValueError("Usage-limit window end must follow its start.")
         elif any(value is not None for value in evidence):
             raise ValueError("Usage-limit evidence belongs only to a limited Invocation.")
+        if self.estimated_cost is not None:
+            if self.status is not InvocationStatus.SUCCEEDED:
+                raise ValueError("Estimated cost belongs only to a succeeded Invocation.")
+            if (
+                self.usage is None
+                or self.usage.input_units is None
+                or self.usage.output_units is None
+            ):
+                raise ValueError("Estimated cost requires input and output usage.")
 
     @classmethod
     def succeeded(
@@ -137,6 +148,7 @@ class Invocation:
         runtime_principal_id: str,
         usage: InvocationUsage | None = None,
         provider_response_id: str | None = None,
+        estimated_cost: InvocationCost | None = None,
     ) -> "Invocation":
         return cls(
             invocation_id,
@@ -153,6 +165,12 @@ class Invocation:
             _duration_ms(started_at, completed_at),
             usage,
             provider_response_id,
+            None,
+            None,
+            None,
+            None,
+            None,
+            estimated_cost,
         )
 
     @classmethod

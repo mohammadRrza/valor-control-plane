@@ -84,11 +84,18 @@ Implemented controls:
 - raw SDK responses, arbitrary metadata, headers, credentials, and provider errors are not persisted.
 - policy-allowed provider execution is guarded by a fail-closed UTC-daily Runtime Principal
   total-unit pre-check using persisted known usage.
+- complete usage can be translated into an immutable Invocation-level estimated USD snapshot when
+  matching static pricing is configured.
 
 Residual threats include credential theft, provider outage, malicious output, latency, concurrent
 usage-limit overshoot, unknown consumption when provider telemetry is absent, and cost abuse. The
 sequential per-principal limit improves basic containment, but there are no request-rate limits,
-tenant budgets, automatic credential revocation, alerting, or monetary calculations.
+tenant budgets, automatic credential revocation, alerting, or monetary enforcement.
+
+Configured pricing improves deterministic attribution but is not invoice-reconciled. Missing usage
+or pricing prevents attribution, and there is no monetary budget, cost-based blocking, provider
+price synchronization, aggregate tenant budget, or managed pricing history outside Invocation
+snapshots.
 
 ### Application to PostgreSQL
 

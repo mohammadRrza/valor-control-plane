@@ -15,6 +15,11 @@ allowance. After policy ALLOW, provider execution requires `known consumed total
 <= limit`. A rejection is persisted as a distinct `limited` Invocation and returned as 429. This
 provides deterministic sequential-request enforcement only; concurrent requests may overshoot.
 
+Successful Invocations with complete input/output usage and matching static pricing also persist an
+immutable estimated USD cost snapshot. Pricing resolves by provider plus exact provider model
+reference. Costs use 12-decimal exact precision and remain stable when configuration changes.
+These values are configured attribution estimates, not reconciled provider invoice amounts.
+
 Planned: dynamic management grants, managed runtime credential rotation/revocation, richer conditional policy, human approval, tool/MCP governance, runtime routing and additional providers, evaluation, telemetry export/aggregation, FinOps, incident, and compliance capabilities. Cost calculation, budgets, rate limits, dashboards, alerts, tracing backends, and retention/redaction are not implemented. No bounded context, policy engine, identity platform, or LLM gateway is complete.
 
 Experimental: none.
@@ -121,6 +126,10 @@ Invocation responses also expose integer lifecycle duration, provider-neutral in
 usage units when supplied, and a sanitized provider response identifier when available. These are
 durable attribution facts, not a metrics, tracing, pricing, billing, budget, quota, or abuse-control
 system. Usage telemetry does not solve sensitive-data retention.
+
+Pricing entries are optional static configuration. Missing pricing or incomplete usage leaves
+`estimated_cost` null without blocking successful execution. No cost aggregation, monetary budget,
+billing, pricing synchronization, or historical backfill is implemented.
 
 The [initial threat model](docs/security/threat-model.md) documents current trust boundaries,
 material risks, and the recommended security sequence. The roadmap is documented in

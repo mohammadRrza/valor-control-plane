@@ -10,6 +10,7 @@ from valor.runtime_gateway.application.errors import (
     ModelNotAvailable,
     TenantNotAvailable,
 )
+from valor.runtime_gateway.domain.cost import InvocationCost
 from valor.runtime_gateway.domain.identity import (
     AgentId,
     InvocationId,
@@ -31,6 +32,7 @@ class SqlAlchemyInvocationRepository:
         self._session = session
 
     async def add(self, invocation: Invocation) -> None:
+        cost = invocation.estimated_cost
         self._session.add(
             InvocationRow(
                 id=invocation.id.value,
@@ -54,6 +56,14 @@ class SqlAlchemyInvocationRepository:
                 usage_allowance_units=invocation.usage_allowance_units,
                 usage_window_start=invocation.usage_window_start,
                 usage_window_end=invocation.usage_window_end,
+                cost_currency=cost.currency if cost else None,
+                cost_input=cost.input_cost if cost else None,
+                cost_output=cost.output_cost if cost else None,
+                cost_total=cost.total_cost if cost else None,
+                pricing_version=cost.pricing_version if cost else None,
+                pricing_basis_units=cost.pricing_basis_units if cost else None,
+                pricing_input_rate=cost.pricing_input_rate if cost else None,
+                pricing_output_rate=cost.pricing_output_rate if cost else None,
             )
         )
         try:
@@ -97,6 +107,7 @@ class SqlAlchemyInvocationRepository:
             row.usage_allowance_units,
             row.usage_window_start,
             row.usage_window_end,
+            _cost_from_row(row),
         )
 
 
@@ -104,3 +115,28 @@ def _usage_from_row(row: InvocationRow) -> InvocationUsage | None:
     if row.input_units is None and row.output_units is None and row.total_units is None:
         return None
     return InvocationUsage(row.input_units, row.output_units, row.total_units)
+
+
+def _cost_from_row(row: InvocationRow) -> InvocationCost | None:
+    if row.cost_currency is None:
+        return None
+    if (
+        row.cost_input is None
+        or row.cost_output is None
+        or row.cost_total is None
+        or row.pricing_version is None
+        or row.pricing_basis_units is None
+        or row.pricing_input_rate is None
+        or row.pricing_output_rate is None
+    ):
+        raise ValueError("Persisted Invocation cost snapshot is incomplete.")
+    return InvocationCost(
+        row.cost_currency,
+        row.cost_input,
+        row.cost_output,
+        row.cost_total,
+        row.pricing_version,
+        row.pricing_basis_units,
+        row.pricing_input_rate,
+        row.pricing_output_rate,
+    )

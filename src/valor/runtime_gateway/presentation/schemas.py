@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from valor.runtime_gateway.domain.cost import InvocationCost
 from valor.runtime_gateway.domain.invocation import MAX_INVOCATION_INPUT_LENGTH, Invocation
 from valor.runtime_gateway.domain.usage import InvocationUsage
 
@@ -30,6 +31,24 @@ class InvocationUsageResponse(BaseModel):
         )
 
 
+class InvocationCostResponse(BaseModel):
+    currency: str
+    input: str
+    output: str
+    total: str
+    pricing_version: str
+
+    @classmethod
+    def from_domain(cls, cost: InvocationCost) -> "InvocationCostResponse":
+        return cls(
+            currency=cost.currency,
+            input=format(cost.input_cost, ".12f"),
+            output=format(cost.output_cost, ".12f"),
+            total=format(cost.total_cost, ".12f"),
+            pricing_version=cost.pricing_version,
+        )
+
+
 class InvocationResponse(BaseModel):
     invocation_id: UUID
     tenant_id: UUID
@@ -50,6 +69,7 @@ class InvocationResponse(BaseModel):
     usage_allowance_units: int | None
     usage_window_start: datetime | None
     usage_window_end: datetime | None
+    estimated_cost: InvocationCostResponse | None
 
     @classmethod
     def from_domain(cls, invocation: Invocation) -> "InvocationResponse":
@@ -75,4 +95,9 @@ class InvocationResponse(BaseModel):
             usage_allowance_units=invocation.usage_allowance_units,
             usage_window_start=invocation.usage_window_start,
             usage_window_end=invocation.usage_window_end,
+            estimated_cost=(
+                InvocationCostResponse.from_domain(invocation.estimated_cost)
+                if invocation.estimated_cost
+                else None
+            ),
         )

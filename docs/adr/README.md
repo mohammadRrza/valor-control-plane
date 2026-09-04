@@ -16,3 +16,4 @@ ADRs record decisions at the time they are made. Supersede rather than silently 
 - [ADR-0012](0012-separate-runtime-principal-authentication.md) — separate runtime workload authentication
 - [ADR-0013](0013-persist-provider-neutral-invocation-usage.md) — persisted provider-neutral Invocation usage
 - [ADR-0014](0014-utc-daily-runtime-principal-usage-limit.md) — UTC daily Runtime Principal usage pre-check
+- [ADR-0015](0015-snapshot-configured-pricing-for-invocation-cost.md) — immutable configured pricing and estimated cost snapshot

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from uuid import UUID
 
 import pytest
@@ -43,6 +44,7 @@ from valor.runtime_gateway.application.errors import (
     ModelNotAvailable,
     TenantNotAvailable,
 )
+from valor.runtime_gateway.domain.cost import InvocationCost
 from valor.runtime_gateway.domain.identity import (
     AgentId,
     InvocationId,
@@ -150,6 +152,69 @@ async def test_succeeded_invocation_persists_and_reconstitutes_exact_values(
         await unit_of_work.commit()
     async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
         assert await unit_of_work.invocations.get(INVOCATION_ID) == expected
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_invocation_cost_snapshot_round_trips_exact_decimal_values(
+    runtime_database_url: str,
+) -> None:
+    sessions, engine = sessions_for(runtime_database_url)
+    await persist_runtime_references(sessions)
+    cost = InvocationCost(
+        "USD",
+        Decimal("0.500000000000"),
+        Decimal("0.800000000000"),
+        Decimal("1.300000000000"),
+        "synthetic-v1",
+        1_000_000,
+        Decimal("2.000000000000"),
+        Decimal("8.000000000000"),
+    )
+    expected = Invocation.succeeded(
+        INVOCATION_ID,
+        TenantId(TENANT_UUID),
+        AgentId(AGENT_UUID),
+        ModelId(MODEL_UUID),
+        "input",
+        "output",
+        STARTED_AT,
+        COMPLETED_AT,
+        DECISION_ID,
+        "runtime-principal",
+        InvocationUsage(250_000, 100_000, 350_000),
+        "provider-response",
+        cost,
+    )
+    async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
+        await unit_of_work.invocations.add(expected)
+        await unit_of_work.commit()
+    async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
+        assert await unit_of_work.invocations.get(INVOCATION_ID) == expected
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "assignment",
+    ["cost_currency = 'USD'", "cost_input = -1"],
+)
+async def test_database_rejects_partial_or_negative_cost_snapshot(
+    runtime_database_url: str, assignment: str
+) -> None:
+    sessions, engine = sessions_for(runtime_database_url)
+    await persist_runtime_references(sessions)
+    async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
+        await unit_of_work.invocations.add(succeeded_invocation())
+        await unit_of_work.commit()
+    with pytest.raises(IntegrityError):
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(f"UPDATE invocations SET {assignment} WHERE id = :id"),  # noqa: S608
+                {"id": INVOCATION_ID.value},
+            )
     await engine.dispose()
 
 

@@ -1,5 +1,6 @@
 """Centralized, environment-driven configuration."""
 
+from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated, Literal
 from uuid import UUID
@@ -37,6 +38,36 @@ class ObservabilitySettings(BaseModel):
 class ProviderSettings(BaseModel):
     openai_api_key: SecretStr | None = None
     timeout_seconds: float = Field(default=30, gt=0, le=300)
+
+
+class PricingEntrySettings(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    provider: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+    provider_model_reference: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ]
+    pricing_version: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ]
+    price_basis_units: int = Field(gt=0)
+    input_price_per_basis: Decimal = Field(ge=0, max_digits=18, decimal_places=12)
+    output_price_per_basis: Decimal = Field(ge=0, max_digits=18, decimal_places=12)
+    currency: Literal["USD"] = "USD"
+
+
+class PricingSettings(BaseModel):
+    entries: tuple[PricingEntrySettings, ...] = ()
+
+    @model_validator(mode="after")
+    def reject_duplicate_pricing(self) -> "PricingSettings":
+        keys = [(entry.provider, entry.provider_model_reference) for entry in self.entries]
+        versions = [entry.pricing_version for entry in self.entries]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Provider pricing keys must be unique.")
+        if len(versions) != len(set(versions)):
+            raise ValueError("Pricing versions must be unique.")
+        return self
 
 
 class SecuritySettings(BaseModel):
@@ -98,6 +129,7 @@ class Settings(BaseSettings):
     database: DatabaseSettings
     observability: ObservabilitySettings = ObservabilitySettings()
     provider: ProviderSettings = ProviderSettings()
+    pricing: PricingSettings = PricingSettings()
     security: SecuritySettings
     runtime_auth: RuntimeAuthenticationSettings
 

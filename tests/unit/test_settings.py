@@ -1,3 +1,4 @@
+from decimal import Decimal
 from uuid import UUID
 
 import pytest
@@ -5,11 +6,58 @@ from pydantic import ValidationError
 
 from valor.bootstrap.settings import (
     DatabaseSettings,
+    PricingEntrySettings,
+    PricingSettings,
     RuntimeAuthenticationSettings,
     RuntimePrincipalSettings,
     SecuritySettings,
     Settings,
 )
+
+
+def pricing_entry(**overrides: object) -> PricingEntrySettings:
+    values: dict[str, object] = {
+        "provider": "openai",
+        "provider_model_reference": "gpt-test",
+        "pricing_version": "synthetic-v1",
+        "price_basis_units": 1_000_000,
+        "input_price_per_basis": "2.0",
+        "output_price_per_basis": "8.0",
+        "currency": "USD",
+    }
+    return PricingEntrySettings.model_validate(values | overrides)
+
+
+def test_valid_and_zero_provider_pricing() -> None:
+    entry = pricing_entry(input_price_per_basis="0", output_price_per_basis="0")
+    assert entry.input_price_per_basis == Decimal("0")
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"input_price_per_basis": "-1"},
+        {"output_price_per_basis": "-1"},
+        {"price_basis_units": 0},
+        {"price_basis_units": -1},
+        {"input_price_per_basis": "not-decimal"},
+        {"currency": "EUR"},
+    ],
+)
+def test_invalid_provider_pricing_fails_fast(overrides: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        pricing_entry(**overrides)
+
+
+@pytest.mark.parametrize("duplicate", ["key", "version"])
+def test_duplicate_provider_pricing_fails_fast(duplicate: str) -> None:
+    first = pricing_entry()
+    second = pricing_entry(
+        provider_model_reference=("gpt-test" if duplicate == "key" else "gpt-other"),
+        pricing_version=("synthetic-v1" if duplicate == "version" else "synthetic-v2"),
+    )
+    with pytest.raises(ValidationError):
+        PricingSettings(entries=(first, second))
 
 
 def test_database_url_is_required(monkeypatch: pytest.MonkeyPatch) -> None:

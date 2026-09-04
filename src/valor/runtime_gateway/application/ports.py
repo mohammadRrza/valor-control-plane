@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
+from valor.runtime_gateway.domain.cost import PricingSnapshot
 from valor.runtime_gateway.domain.identity import (
     AgentId,
     InvocationId,
@@ -80,6 +81,12 @@ class RuntimeUsageReaderPort(Protocol):
         window_start: datetime,
         window_end: datetime,
     ) -> int: ...
+
+
+class InvocationPricingPort(Protocol):
+    def resolve(
+        self, *, provider: str, provider_model_reference: str
+    ) -> PricingSnapshot | None: ...
 
 
 class ProviderTransportError(Exception):

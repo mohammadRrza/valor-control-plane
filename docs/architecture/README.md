@@ -144,6 +144,19 @@ This is sequential-request containment, not strict concurrent quota accounting. 
 may observe the same total and both proceed. Unknown provider usage cannot be counted, and actual
 usage may exceed the configured allowance because it is not a provider generation cap.
 
+### Invocation cost attribution
+
+After provider success, Runtime Gateway resolves optional static pricing by exact provider and
+provider-model reference. Complete input/output usage plus matching pricing produces an estimated
+USD cost using exact Decimal arithmetic. The Invocation stores component costs, total, currency,
+pricing version, basis, and input/output rates as an immutable snapshot. GET reads this snapshot;
+it never consults current pricing, so configuration changes do not rewrite history.
+
+Missing pricing or usage leaves cost null, as do failed, denied, and limited outcomes. API cost
+values are decimal strings. Configured estimates are not provider invoice truth: there is no
+pricing database or synchronization, invoice reconciliation, FX, billing, aggregation, monetary
+budget, or cost-based blocking.
+
 ### Default-deny Agent-to-Model admission
 
 Policy & Risk owns one `AgentModelPermission` per Tenant/Agent/Model tuple. PUT atomically creates or replaces the current `ALLOW`/`DENY` effect while preserving PermissionId and creation time. There are no conditions, wildcards, inheritance, rule precedence, versions, assignments, RBAC/ABAC, or external policy engine.

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from types import TracebackType
 from typing import Self
 from uuid import UUID
@@ -31,6 +32,7 @@ from valor.runtime_gateway.application.ports import (
     ProviderTransportError,
     RuntimePolicyDecision,
 )
+from valor.runtime_gateway.domain.cost import PricingSnapshot
 from valor.runtime_gateway.domain.identity import (
     AgentId,
     InvocationId,
@@ -202,6 +204,15 @@ class UsageReaderStub:
         return self.consumed
 
 
+class PricingStub:
+    def __init__(self, pricing: PricingSnapshot | None = None) -> None:
+        self.pricing = pricing
+
+    def resolve(self, *, provider: str, provider_model_reference: str) -> PricingSnapshot | None:
+        del provider, provider_model_reference
+        return self.pricing
+
+
 def handler(
     unit_of_work: RecordingInvocationUnitOfWork,
     admission: AdmissionStub,
@@ -209,6 +220,7 @@ def handler(
     policy: PolicyStub | None = None,
     events: list[str] | None = None,
     usage_reader: UsageReaderStub | None = None,
+    pricing: PricingStub | None = None,
 ) -> CreateInvocationHandler:
     times = iter((STARTED_AT, COMPLETED_AT))
 
@@ -226,6 +238,7 @@ def handler(
         provider,
         policy or PolicyStub(),
         usage_reader or UsageReaderStub(events=events),
+        pricing or PricingStub(),
         id_factory=lambda: INVOCATION_UUID,
         clock=clock,
     )
@@ -252,6 +265,24 @@ async def test_valid_admission_invokes_provider_and_commits_succeeded_invocation
     assert provider.calls == [("gpt-test", "explain zero trust")]
     assert unit_of_work.commits == 1
     assert unit_of_work.entered == 1
+
+
+@pytest.mark.asyncio
+async def test_success_attributes_exact_configured_cost() -> None:
+    pricing = PricingSnapshot(
+        "openai", "gpt-test", "test-pricing-v1", 1_000_000, Decimal("2"), Decimal("8")
+    )
+    result = await handler(
+        RecordingInvocationUnitOfWork(),
+        AdmissionStub(),
+        ProviderStub(),
+        pricing=PricingStub(pricing),
+    )(command())
+    assert result.estimated_cost is not None
+    assert result.estimated_cost.input_cost == Decimal("0.000024000000")
+    assert result.estimated_cost.output_cost == Decimal("0.000064000000")
+    assert result.estimated_cost.total_cost == Decimal("0.000088000000")
+    assert result.estimated_cost.pricing_version == "test-pricing-v1"
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ from valor.runtime_gateway.application.errors import (
 )
 from valor.runtime_gateway.application.ports import (
     AgentRuntimeLookupPort,
+    InvocationPricingPort,
     ModelProviderPort,
     ModelRuntimeLookupPort,
     ProviderTransportError,
@@ -24,6 +25,7 @@ from valor.runtime_gateway.application.ports import (
     TenantRuntimeLookupPort,
 )
 from valor.runtime_gateway.application.unit_of_work import InvocationUnitOfWork
+from valor.runtime_gateway.domain.cost import attribute_cost
 from valor.runtime_gateway.domain.identity import AgentId, InvocationId, ModelId, TenantId
 from valor.runtime_gateway.domain.invocation import Invocation, validated_input
 from valor.runtime_gateway.domain.usage_limit import decide_usage_limit, utc_day_window
@@ -54,6 +56,7 @@ class CreateInvocationHandler:
         openai_provider: ModelProviderPort,
         policy: RuntimePolicyDecisionPort,
         usage_reader: RuntimeUsageReaderPort,
+        pricing: InvocationPricingPort,
         *,
         id_factory: Callable[[], UUID] = uuid4,
         clock: Callable[[], datetime] = utc_now,
@@ -65,6 +68,7 @@ class CreateInvocationHandler:
         self._openai_provider = openai_provider
         self._policy = policy
         self._usage_reader = usage_reader
+        self._pricing = pricing
         self._id_factory = id_factory
         self._clock = clock
 
@@ -154,6 +158,11 @@ class CreateInvocationHandler:
             await self._persist(failed)
             raise ProviderInvocationFailed(invocation_id) from None
 
+        pricing = self._pricing.resolve(
+            provider=model.provider,
+            provider_model_reference=model.provider_model_reference,
+        )
+        cost = attribute_cost(result.usage, pricing)
         succeeded = Invocation.succeeded(
             invocation_id,
             command.tenant_id,
@@ -167,6 +176,7 @@ class CreateInvocationHandler:
             command.runtime_principal_id,
             result.usage,
             result.provider_response_id,
+            cost,
         )
         await self._persist(succeeded)
         return succeeded
