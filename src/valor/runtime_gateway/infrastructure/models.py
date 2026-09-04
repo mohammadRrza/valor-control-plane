@@ -46,6 +46,7 @@ class InvocationRow(SqlAlchemyBase):
             "runtime_principal_id",
             "started_at",
         ),
+        Index("ix_invocations_tenant_started_at", "tenant_id", "started_at"),
         CheckConstraint(
             "(cost_currency IS NULL AND cost_input IS NULL AND cost_output IS NULL "
             "AND cost_total IS NULL AND pricing_version IS NULL "

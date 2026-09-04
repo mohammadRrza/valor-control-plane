@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -18,6 +19,7 @@ from valor.bootstrap.settings import (
     RuntimePrincipalSettings,
 )
 from valor.runtime_gateway.application.errors import UsageLimitUnavailable
+from valor.runtime_gateway.application.reporting import RuntimeReportUnavailable
 from valor.runtime_gateway.infrastructure.pricing import ConfiguredInvocationPricing
 
 
@@ -25,6 +27,16 @@ class FailingUsageReader:
     async def consumed_total_units(self, **kwargs: object) -> int:
         del kwargs
         raise UsageLimitUnavailable
+
+
+class FailingReportReader:
+    async def tenant_exists(self, tenant_id: object) -> bool:
+        del tenant_id
+        raise RuntimeReportUnavailable
+
+    async def get_report(self, **kwargs: object) -> object:
+        del kwargs
+        raise AssertionError("report query must not follow a failed existence read")
 
 
 def runtime_token(agent_id: UUID) -> str:
@@ -157,6 +169,104 @@ def assert_problem(response_status: int, content_type: str, body: dict[str, obje
     assert body.keys() >= {"type", "title", "status", "detail", "instance"}
     assert body["status"] == response_status
     assert content_type.startswith("application/problem+json")
+
+
+@pytest.mark.integration
+def test_tenant_runtime_report_is_management_scoped_and_empty_is_explicit(
+    runtime_client: TestClient,
+) -> None:
+    tenant_a = create_tenant(runtime_client, "Reporting Tenant A")
+    tenant_b = create_tenant(runtime_client, "Reporting Tenant B")
+    agent_a = create_agent(runtime_client, tenant_a, "Reporting Runtime Agent")
+    security = cast(FastAPI, runtime_client.app).state.settings.security
+    security.management_tenant_ids = frozenset({tenant_a})
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    params = {"start": start.isoformat(), "end": (start + timedelta(days=1)).isoformat()}
+
+    response = runtime_client.get(f"/api/v1/tenants/{tenant_a}/runtime-report", params=params)
+    assert response.status_code == 200
+    assert response.json() == {
+        "tenant_id": str(tenant_a),
+        "start": "2026-09-01T00:00:00Z",
+        "end": "2026-09-02T00:00:00Z",
+        "invocations": {
+            "total": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "denied": 0,
+            "limited": 0,
+        },
+        "usage": {
+            "input_units": 0,
+            "output_units": 0,
+            "total_units": 0,
+            "provider_executed_invocations": 0,
+            "attributed_invocations": 0,
+            "unavailable_invocations": 0,
+        },
+        "estimated_cost": {
+            "currency": "USD",
+            "total": "0.000000000000",
+            "attributed_invocations": 0,
+            "unavailable_invocations": 0,
+        },
+    }
+    assert (
+        runtime_client.get(f"/api/v1/tenants/{tenant_b}/runtime-report", params=params).status_code
+        == 404
+    )
+    assert (
+        runtime_client.get(
+            f"/api/v1/tenants/{tenant_a}/runtime-report",
+            params=params,
+            headers=runtime_headers(agent_a),
+        ).status_code
+        == 401
+    )
+
+
+@pytest.mark.integration
+def test_tenant_runtime_report_requires_auth_and_valid_bounded_aware_range(
+    unauthenticated_runtime_client: TestClient,
+) -> None:
+    tenant_id = uuid4()
+    path = f"/api/v1/tenants/{tenant_id}/runtime-report"
+    aware = datetime(2026, 9, 1, tzinfo=UTC)
+    valid = {"start": aware.isoformat(), "end": (aware + timedelta(days=1)).isoformat()}
+    assert unauthenticated_runtime_client.get(path, params=valid).status_code == 401
+
+    app = cast(FastAPI, unauthenticated_runtime_client.app)
+    app.state.settings.security.management_tenant_ids = frozenset({tenant_id})
+    headers = {"Authorization": f"Bearer {TEST_MANAGEMENT_TOKEN}"}
+    invalid_ranges = [
+        {"start": "2026-09-01T00:00:00", "end": "2026-09-02T00:00:00Z"},
+        {"start": "2026-09-01T00:00:00Z", "end": "2026-09-02T00:00:00"},
+        {"start": aware.isoformat(), "end": aware.isoformat()},
+        {
+            "start": aware.isoformat(),
+            "end": (aware + timedelta(days=31, microseconds=1)).isoformat(),
+        },
+    ]
+    for params in invalid_ranges:
+        response = unauthenticated_runtime_client.get(path, params=params, headers=headers)
+        assert response.status_code == 422
+        assert_problem(response.status_code, response.headers["content-type"], response.json())
+
+
+@pytest.mark.integration
+def test_tenant_runtime_reporting_dependency_failure_is_sanitized(
+    runtime_client: TestClient,
+) -> None:
+    tenant_id = create_tenant(runtime_client, "Unavailable Reporting Tenant")
+    cast(FastAPI, runtime_client.app).state.runtime_report_reader = FailingReportReader()
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    response = runtime_client.get(
+        f"/api/v1/tenants/{tenant_id}/runtime-report",
+        params={"start": start.isoformat(), "end": (start + timedelta(days=1)).isoformat()},
+    )
+    assert response.status_code == 503
+    assert_problem(response.status_code, response.headers["content-type"], response.json())
+    assert "sql" not in response.text.lower()
 
 
 @pytest.mark.integration

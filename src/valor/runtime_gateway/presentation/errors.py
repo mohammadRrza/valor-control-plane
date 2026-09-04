@@ -15,10 +15,48 @@ from valor.runtime_gateway.application.errors import (
     TenantNotAvailable,
     UsageLimitUnavailable,
 )
+from valor.runtime_gateway.application.reporting import (
+    InvalidReportRange,
+    RuntimeReportUnavailable,
+    TenantRuntimeReportNotFound,
+)
 from valor.runtime_gateway.domain.errors import InvalidInvocationInput
 
 
 def install_runtime_gateway_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(InvalidReportRange)
+    async def invalid_report_range(request: Request, exc: InvalidReportRange) -> JSONResponse:
+        return problem_response(
+            request,
+            title="Invalid Runtime Report Range",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+
+    @app.exception_handler(TenantRuntimeReportNotFound)
+    async def runtime_report_not_found(
+        request: Request, exc: TenantRuntimeReportNotFound
+    ) -> JSONResponse:
+        del exc
+        return problem_response(
+            request,
+            title="Tenant Runtime Report Not Found",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The requested Tenant Runtime report was not found.",
+        )
+
+    @app.exception_handler(RuntimeReportUnavailable)
+    async def runtime_report_unavailable(
+        request: Request, exc: RuntimeReportUnavailable
+    ) -> JSONResponse:
+        del exc
+        return problem_response(
+            request,
+            title="Runtime Reporting Unavailable",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Runtime reporting is temporarily unavailable.",
+        )
+
     async def unavailable_resource(request: Request) -> JSONResponse:
         return problem_response(
             request,

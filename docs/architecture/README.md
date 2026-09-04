@@ -157,6 +157,20 @@ values are decimal strings. Configured estimates are not provider invoice truth:
 pricing database or synchronization, invoice reconciliation, FX, billing, aggregation, monetary
 budget, or cost-based blocking.
 
+### Tenant Runtime reporting
+
+An authenticated Management Principal can request one aggregate report for an authorized,
+existing Tenant over a required UTC-aware `[start, end)` range of at most 31 days. A narrow
+application read model calls a PostgreSQL adapter that aggregates by `tenant_id` and `started_at`;
+it never loads Invocation rows into application memory and never uses the write Unit of Work.
+
+Status counts cover succeeded, failed, denied, and limited outcomes. Usage totals include only
+complete persisted usage tuples, with provider-executed, attributed, and unavailable counts.
+Estimated USD cost sums persisted snapshots and exposes attributed/unavailable success counts;
+different historical pricing versions may therefore contribute to one total. The response omits
+prompts, outputs, Invocation IDs, and asset labels. Agent/Model breakdowns, reporting tables,
+repricing, billing, dashboards, exports, and an analytics store are intentionally absent.
+
 ### Default-deny Agent-to-Model admission
 
 Policy & Risk owns one `AgentModelPermission` per Tenant/Agent/Model tuple. PUT atomically creates or replaces the current `ALLOW`/`DENY` effect while preserving PermissionId and creation time. There are no conditions, wildcards, inheritance, rule precedence, versions, assignments, RBAC/ABAC, or external policy engine.

@@ -2,7 +2,7 @@
 
 **Status:** Initial, living document
 **Scope:** Implemented VALOR management plane, Runtime Gateway, Policy & Risk, PostgreSQL,
-and OpenAI provider boundary through Phase 3.0
+and OpenAI provider boundary through Phase 3.3
 
 This document describes current trust boundaries and risks. Planned controls are not described as
 implemented. Revisit it whenever identity, data retention, provider routing, or deployment
@@ -96,6 +96,14 @@ Configured pricing improves deterministic attribution but is not invoice-reconci
 or pricing prevents attribution, and there is no monetary budget, cost-based blocking, provider
 price synchronization, aggregate tenant budget, or managed pricing history outside Invocation
 snapshots.
+
+Tenant-scoped Runtime reports let authorized Management operators inspect aggregate status, known
+usage, and estimated cost without retrieving individual prompts or outputs. Existing non-disclosing
+Tenant authorization prevents UUID knowledge from exposing another Tenant's aggregates, and the
+required 31-day maximum range limits accidental broad scans. Residual risk remains: completeness
+depends on provider telemetry and pricing attribution, estimates are not invoice truth, raw
+Invocation retention still exists, there is no report audit trail or budget enforcement, and static
+Management credentials remain broad within their configured Tenant set.
 
 ### Application to PostgreSQL
 
