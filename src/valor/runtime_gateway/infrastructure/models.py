@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from valor.infrastructure.sqlalchemy import SqlAlchemyBase
@@ -17,6 +17,10 @@ class InvocationRow(SqlAlchemyBase):
             "(status IN ('failed', 'denied') AND output_text IS NULL)",
             name="ck_invocations_status_output",
         ),
+        CheckConstraint("duration_ms >= 0", name="ck_invocations_duration_non_negative"),
+        CheckConstraint("input_units >= 0", name="ck_invocations_input_units_non_negative"),
+        CheckConstraint("output_units >= 0", name="ck_invocations_output_units_non_negative"),
+        CheckConstraint("total_units >= 0", name="ck_invocations_total_units_non_negative"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -42,3 +46,8 @@ class InvocationRow(SqlAlchemyBase):
         nullable=True,
     )
     runtime_principal_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider_response_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

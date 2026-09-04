@@ -504,6 +504,13 @@ def test_create_then_get_invocation_with_deterministic_provider(
     assert body["status"] == "succeeded"
     assert body["output"] == "provider output for Explain zero trust."
     assert body["input"] == "Explain zero trust."
+    assert isinstance(body["duration_ms"], int) and body["duration_ms"] >= 0
+    assert body["usage"] == {
+        "input_units": 17,
+        "output_units": 9,
+        "total_units": 26,
+    }
+    assert body["provider_response_id"] == "resp_deterministic_123"
     assert created.headers["location"] == (f"/api/v1/runtime/invocations/{body['invocation_id']}")
     assert runtime_provider.calls == [("gpt-test", "Explain zero trust.")]
     retrieved = runtime_client.get(
@@ -657,7 +664,9 @@ async def test_provider_failure_returns_bad_gateway_and_persists_failed_invocati
         row = (
             await connection.execute(
                 text(
-                    "SELECT i.status, i.output_text, i.input_text, d.effect, "
+                    "SELECT i.status, i.output_text, i.input_text, i.duration_ms, "
+                    "i.input_units, i.output_units, i.total_units, "
+                    "i.provider_response_id, d.effect, "
                     "i.policy_decision_id = d.id AS linked "
                     "FROM invocations i JOIN policy_decisions d "
                     "ON d.invocation_id = i.id "
@@ -669,6 +678,9 @@ async def test_provider_failure_returns_bad_gateway_and_persists_failed_invocati
     assert row.status == "failed"
     assert row.output_text is None
     assert row.input_text == "Explain zero trust."
+    assert row.duration_ms >= 0
+    assert row.input_units is row.output_units is row.total_units is None
+    assert row.provider_response_id is None
     assert row.effect == "allow"
     assert row.linked is True
     await engine.dispose()
@@ -700,7 +712,9 @@ async def test_default_and_explicit_deny_never_call_provider(
         row = (
             await connection.execute(
                 text(
-                    "SELECT i.status, i.policy_decision_id = d.id AS linked, "
+                    "SELECT i.status, i.duration_ms, i.input_units, i.output_units, "
+                    "i.total_units, i.provider_response_id, "
+                    "i.policy_decision_id = d.id AS linked, "
                     "d.permission_id FROM invocations i JOIN policy_decisions d "
                     "ON d.invocation_id = i.id WHERE i.tenant_id = :tenant_id"
                 ),
@@ -708,6 +722,9 @@ async def test_default_and_explicit_deny_never_call_provider(
             )
         ).one()
     assert row.status == "denied"
+    assert row.duration_ms >= 0
+    assert row.input_units is row.output_units is row.total_units is None
+    assert row.provider_response_id is None
     assert row.linked is True
     assert (row.permission_id is not None) is explicit
     await engine.dispose()

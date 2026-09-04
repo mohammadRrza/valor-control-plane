@@ -2,7 +2,7 @@
 
 **Status:** Initial, living document
 **Scope:** Implemented VALOR management plane, Runtime Gateway, Policy & Risk, PostgreSQL,
-and OpenAI provider boundary through Phase 2.3
+and OpenAI provider boundary through Phase 3.0
 
 This document describes current trust boundaries and risks. Planned controls are not described as
 implemented. Revisit it whenever identity, data retention, provider routing, or deployment
@@ -25,7 +25,8 @@ The primary assets are:
 
 - governance configuration: Tenants, Agents, Models, and Agent-to-Model permissions;
 - provider credentials, which grant external access and can create financial cost;
-- Invocation input/output, identity references, status, and timestamps;
+- Invocation input/output, identity references, status, timestamps, duration, normalized usage,
+  and safe provider response correlation;
 - PolicyDecision evidence connecting an attempted Invocation to ALLOW or DENY;
 - management principal identity, bearer credential, and configured Tenant scopes.
 
@@ -79,10 +80,12 @@ Implemented controls:
 - provider errors are sanitized;
 - provider timeout is bounded;
 - the OpenAI request sets `store=false`.
+- provider usage and response identity are allow-listed and normalized before persistence;
+- raw SDK responses, arbitrary metadata, headers, credentials, and provider errors are not persisted.
 
 Residual threats include credential theft, provider outage, malicious output, latency, unbounded
-usage, and cost abuse. VALOR persists its provider-neutral output text, though it does not persist a
-raw SDK response object.
+usage, and cost abuse. Usage attribution now improves investigation and future cost analysis, but
+there are no per-principal limits, quotas, budgets, automatic blocking, or monetary calculations.
 
 ### Application to PostgreSQL
 
@@ -115,6 +118,7 @@ have no durable management actor record, and lack of permission history or appro
 | Information disclosure | Database/backup reveals prompt/response | Infrastructure access boundary | High/Medium | Retention, redaction, classification, encryption policy |
 | Denial of service | Runtime exhausts connections/provider capacity | Provider timeout | High/Medium | Identity-aware limits and concurrency controls |
 | Cost abuse | Stolen runtime credential incurs provider spend | Runtime authentication plus default-deny model policy | High/Medium | Rotation, rate limits, quotas/budgets |
+| Repudiation | Provider execution cannot be correlated during support investigation | Safe provider response ID persisted when available | Medium/Low | Managed tracing and retention policy |
 | Elevation of privilege | Caller claims a more privileged Agent | Request identity removed; credential binds exact Tenant/Agent | Mitigated; stolen credential remains High | Managed workload identity lifecycle |
 
 ## Highest-priority attack scenario
@@ -139,6 +143,7 @@ Implemented strengths:
 - Tenant ownership and non-disclosing cross-Tenant management failures;
 - default-deny Agent-to-Model runtime admission;
 - persisted PolicyDecision and Invocation records;
+- persisted duration, normalized usage attribution, and safe provider response correlation;
 - provider-secret isolation and sanitized upstream failures;
 - PostgreSQL integrity constraints and explicit transactions.
 
@@ -146,15 +151,14 @@ Material gaps:
 
 1. Static runtime credential lifecycle, theft, replay, rotation, and revocation — High.
 2. Sensitive Invocation data retention/redaction policy — High/Medium.
-3. Identity-aware rate, concurrency, and budget controls — Medium.
+3. Identity-aware rate, concurrency, and budget controls — Medium; observability does not enforce them.
 4. Individual management accountability and policy-change audit — Medium.
 
 ## Recommended sequence
 
 ```text
 Managed runtime credential issuance/rotation/revocation
-  → Usage metadata and observability
-  → Per-principal rate/budget controls
+  → Per-principal rate/budget controls using persisted usage facts
   → Sensitive-data retention and redaction
   → Management mutation audit
   → Enterprise identity/OIDC when justified

@@ -37,6 +37,7 @@ from valor.runtime_gateway.domain.identity import (
     TenantId,
 )
 from valor.runtime_gateway.domain.invocation import Invocation, InvocationStatus
+from valor.runtime_gateway.domain.usage import InvocationUsage
 
 INVOCATION_UUID = UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
 TENANT_ID = TenantId(UUID("11111111-1111-4111-8111-111111111111"))
@@ -95,6 +96,7 @@ class AdmissionStub:
         tenant_exists: bool = True,
         agent: AgentRuntimeIdentity | None = None,
         model: ModelRuntimeReference | None = None,
+        events: list[str] | None = None,
     ) -> None:
         self.tenant_exists = tenant_exists
         self.agent: AgentRuntimeIdentity | None = (
@@ -105,36 +107,49 @@ class AdmissionStub:
             if model is not None
             else ModelRuntimeReference(MODEL_ID, TENANT_ID, "openai", "gpt-test")
         )
+        self.events = events
 
     async def exists(self, tenant_id: TenantId) -> bool:
         del tenant_id
+        if self.events is not None:
+            self.events.append("tenant")
         return self.tenant_exists
 
     async def get_agent(self, agent_id: AgentId) -> AgentRuntimeIdentity | None:
         del agent_id
+        if self.events is not None:
+            self.events.append("agent")
         return self.agent
 
     async def get_model(self, model_id: ModelId) -> ModelRuntimeReference | None:
         del model_id
+        if self.events is not None:
+            self.events.append("model")
         return self.model
 
 
 class ProviderStub:
-    def __init__(self, *, fails: bool = False) -> None:
+    def __init__(self, *, fails: bool = False, events: list[str] | None = None) -> None:
         self.fails = fails
         self.calls: list[tuple[str, str]] = []
+        self.events = events
 
     async def invoke(self, *, model_reference: str, input_text: str) -> ProviderInvocationResult:
         self.calls.append((model_reference, input_text))
+        if self.events is not None:
+            self.events.append("provider")
         if self.fails:
             raise ProviderTransportError
-        return ProviderInvocationResult("deterministic output")
+        return ProviderInvocationResult(
+            "deterministic output", InvocationUsage(12, 8, 20), "provider-response-1"
+        )
 
 
 class PolicyStub:
-    def __init__(self, effect: str = "allow") -> None:
+    def __init__(self, effect: str = "allow", *, events: list[str] | None = None) -> None:
         self.effect = effect
         self.calls = 0
+        self.events = events
 
     async def decide(
         self,
@@ -146,6 +161,8 @@ class PolicyStub:
     ) -> RuntimePolicyDecision:
         del invocation_id, tenant_id, agent_id, model_id
         self.calls += 1
+        if self.events is not None:
+            self.events.append("policy")
         return RuntimePolicyDecision(DECISION_ID, self.effect, None)
 
 
@@ -154,8 +171,16 @@ def handler(
     admission: AdmissionStub,
     provider: ProviderStub,
     policy: PolicyStub | None = None,
+    events: list[str] | None = None,
 ) -> CreateInvocationHandler:
     times = iter((STARTED_AT, COMPLETED_AT))
+
+    def clock() -> datetime:
+        value = next(times)
+        if events is not None:
+            events.append("clock:start" if value == STARTED_AT else "clock:complete")
+        return value
+
     return CreateInvocationHandler(
         unit_of_work,
         admission,
@@ -164,7 +189,7 @@ def handler(
         provider,
         policy or PolicyStub(),
         id_factory=lambda: INVOCATION_UUID,
-        clock=lambda: next(times),
+        clock=clock,
     )
 
 
@@ -183,9 +208,41 @@ async def test_valid_admission_invokes_provider_and_commits_succeeded_invocation
     assert result.status is InvocationStatus.SUCCEEDED
     assert result.output_text == "deterministic output"
     assert (result.started_at, result.completed_at) == (STARTED_AT, COMPLETED_AT)
+    assert result.duration_ms == 1_000
+    assert result.usage == InvocationUsage(12, 8, 20)
+    assert result.provider_response_id == "provider-response-1"
     assert provider.calls == [("gpt-test", "explain zero trust")]
     assert unit_of_work.commits == 1
     assert unit_of_work.entered == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["succeeded", "failed", "denied"])
+async def test_all_final_outcomes_measure_from_application_processing_start(
+    outcome: str,
+) -> None:
+    events: list[str] = []
+    unit_of_work = RecordingInvocationUnitOfWork()
+    admission = AdmissionStub(events=events)
+    provider = ProviderStub(fails=outcome == "failed", events=events)
+    policy = PolicyStub("deny" if outcome == "denied" else "allow", events=events)
+    create = handler(unit_of_work, admission, provider, policy, events)
+
+    if outcome == "failed":
+        with pytest.raises(ProviderInvocationFailed):
+            await create(command())
+    elif outcome == "denied":
+        with pytest.raises(InvocationDenied):
+            await create(command())
+    else:
+        await create(command())
+
+    assert events[0] == "clock:start"
+    assert events[1:5] == ["tenant", "agent", "model", "policy"]
+    assert events[-1] == "clock:complete"
+    assert ("provider" in events) is (outcome != "denied")
+    invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
+    assert invocation.duration_ms == 1_000
 
 
 @pytest.mark.asyncio
@@ -255,6 +312,9 @@ async def test_provider_failure_is_recorded_then_translated() -> None:
     assert error.value.invocation_id == invocation_id
     assert unit_of_work.invocations.items[invocation_id].status is InvocationStatus.FAILED
     assert unit_of_work.invocations.items[invocation_id].output_text is None
+    assert unit_of_work.invocations.items[invocation_id].duration_ms == 1_000
+    assert unit_of_work.invocations.items[invocation_id].usage is None
+    assert unit_of_work.invocations.items[invocation_id].provider_response_id is None
     assert unit_of_work.commits == 1
 
 
@@ -290,6 +350,9 @@ async def test_policy_deny_records_denied_invocation_without_provider(effect: st
     invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
     assert invocation.status is InvocationStatus.DENIED
     assert invocation.policy_decision_id == DECISION_ID
+    assert invocation.duration_ms == 1_000
+    assert invocation.usage is None
+    assert invocation.provider_response_id is None
     assert error.value.decision_id == DECISION_ID
     assert provider.calls == []
     assert unit_of_work.commits == 1

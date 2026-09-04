@@ -17,6 +17,7 @@ from valor.runtime_gateway.application.ports import (
     ProviderInvocationResult,
     ProviderTransportError,
 )
+from valor.runtime_gateway.domain.usage import InvocationUsage
 
 
 class DeterministicRuntimeProvider:
@@ -28,7 +29,11 @@ class DeterministicRuntimeProvider:
         self.calls.append((model_reference, input_text))
         if self.fails:
             raise ProviderTransportError
-        return ProviderInvocationResult(f"provider output for {input_text}")
+        return ProviderInvocationResult(
+            f"provider output for {input_text}",
+            InvocationUsage(17, 9, 26),
+            "resp_deterministic_123",
+        )
 
 
 TEST_MANAGEMENT_TOKEN = "test-only-management-token-32-bytes"

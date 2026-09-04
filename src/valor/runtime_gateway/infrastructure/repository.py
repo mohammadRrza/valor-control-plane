@@ -18,6 +18,7 @@ from valor.runtime_gateway.domain.identity import (
     TenantId,
 )
 from valor.runtime_gateway.domain.invocation import Invocation, InvocationStatus
+from valor.runtime_gateway.domain.usage import InvocationUsage
 from valor.runtime_gateway.infrastructure.models import InvocationRow
 
 TENANT_FOREIGN_KEY = "fk_invocations_tenant_id_tenants"
@@ -43,6 +44,11 @@ class SqlAlchemyInvocationRepository:
                 completed_at=invocation.completed_at,
                 policy_decision_id=invocation.policy_decision_id.value,
                 runtime_principal_id=invocation.runtime_principal_id,
+                duration_ms=invocation.duration_ms,
+                input_units=invocation.usage.input_units if invocation.usage else None,
+                output_units=invocation.usage.output_units if invocation.usage else None,
+                total_units=invocation.usage.total_units if invocation.usage else None,
+                provider_response_id=invocation.provider_response_id,
             )
         )
         try:
@@ -78,4 +84,13 @@ class SqlAlchemyInvocationRepository:
             row.completed_at,
             PolicyDecisionId(row.policy_decision_id),
             row.runtime_principal_id,
+            row.duration_ms,
+            _usage_from_row(row),
+            row.provider_response_id,
         )
+
+
+def _usage_from_row(row: InvocationRow) -> InvocationUsage | None:
+    if row.input_units is None and row.output_units is None and row.total_units is None:
+        return None
+    return InvocationUsage(row.input_units, row.output_units, row.total_units)

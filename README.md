@@ -6,11 +6,11 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 ## Status
 
-**Current phase: Phase 2 — Runtime Gateway (in progress).**
+**Current phase: Phase 3 — Usage and observability foundation (in progress).**
 
-Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; static management authentication and Tenant authorization; and separate static Runtime Principal authentication with Invocation read isolation.
+Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; static management authentication and Tenant authorization; separate static Runtime Principal authentication with Invocation read isolation; and persisted Invocation duration, normalized provider usage, and safe provider response correlation when available.
 
-Planned: dynamic management grants, managed runtime credential rotation/revocation, richer conditional policy, human approval, tool/MCP governance, runtime routing and additional providers, evaluation, telemetry, FinOps, incident, and compliance capabilities. No bounded context, policy engine, identity platform, or LLM gateway is complete.
+Planned: dynamic management grants, managed runtime credential rotation/revocation, richer conditional policy, human approval, tool/MCP governance, runtime routing and additional providers, evaluation, telemetry export/aggregation, FinOps, incident, and compliance capabilities. Cost calculation, budgets, rate limits, dashboards, alerts, tracing backends, and retention/redaction are not implemented. No bounded context, policy engine, identity platform, or LLM gateway is complete.
 
 Experimental: none.
 
@@ -81,7 +81,7 @@ src/valor/
     infrastructure/ SQLAlchemy mapping, repository, and UoW adapter
     presentation/   tenant HTTP contracts, routes, and error mapping
   runtime_gateway/
-    domain/         Invocation identity, final status, and text invariants
+    domain/         Invocation identity, final status, text, duration, and usage invariants
     application/    CreateInvocation/GetInvocation and narrow runtime ports
     infrastructure/ PostgreSQL admission/persistence and OpenAI Responses adapter
     presentation/   runtime HTTP contracts, routes, and error mappings
@@ -111,6 +111,11 @@ Tenant creation is an authenticated provisioning exception because its generated
 Runtime authentication does not replace authorization: an explicit ALLOW for the authenticated Tenant/Agent and requested Model remains required. Static runtime configuration has no issuance, rotation, revocation, expiry, rate limits, or workload federation, so this remains an interim boundary requiring TLS and secure secret injection.
 
 Invocation input and output text are currently persisted for this first runtime/audit slice and returned by the Invocation API. Raw input/output and credentials are not logged. Redaction, retention, data classification, access controls, and encryption policy are not yet implemented, so this storage policy is not production-complete for sensitive workloads.
+
+Invocation responses also expose integer lifecycle duration, provider-neutral input/output/total
+usage units when supplied, and a sanitized provider response identifier when available. These are
+durable attribution facts, not a metrics, tracing, pricing, billing, budget, quota, or abuse-control
+system. Usage telemetry does not solve sensitive-data retention.
 
 The [initial threat model](docs/security/threat-model.md) documents current trust boundaries,
 material risks, and the recommended security sequence. The roadmap is documented in

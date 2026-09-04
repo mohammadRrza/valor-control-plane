@@ -11,6 +11,7 @@ from valor.runtime_gateway.domain.identity import (
     PolicyDecisionId,
     TenantId,
 )
+from valor.runtime_gateway.domain.usage import InvocationUsage
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,8 @@ class ModelRuntimeReference:
 @dataclass(frozen=True, slots=True)
 class ProviderInvocationResult:
     output_text: str
+    usage: InvocationUsage | None = None
+    provider_response_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

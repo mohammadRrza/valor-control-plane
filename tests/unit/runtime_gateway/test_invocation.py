@@ -12,6 +12,7 @@ from valor.runtime_gateway.domain.identity import (
     TenantId,
 )
 from valor.runtime_gateway.domain.invocation import Invocation, InvocationStatus
+from valor.runtime_gateway.domain.usage import InvocationUsage
 
 INVOCATION_ID = InvocationId(UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
 TENANT_ID = TenantId(UUID("11111111-1111-4111-8111-111111111111"))
@@ -41,6 +42,7 @@ def test_succeeded_invocation_has_valor_identity_and_final_output() -> None:
     assert invocation.input_text == "Explain zero trust."
     assert invocation.output_text == "Trust must be continuously verified."
     assert invocation.runtime_principal_id == PRINCIPAL_ID
+    assert invocation.duration_ms == 1_000
 
 
 def test_failed_invocation_has_no_provider_output() -> None:
@@ -192,3 +194,59 @@ def test_invocation_requires_runtime_principal_identity() -> None:
             DECISION_ID,
             " ",
         )
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        InvocationUsage(0, 0, 0),
+        InvocationUsage(None, None, None),
+        InvocationUsage(4, None, 4),
+    ],
+)
+def test_invocation_usage_accepts_zero_and_optional_components(usage: InvocationUsage) -> None:
+    assert usage.input_units in (0, 4, None)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [(-1, None, None), (None, -1, None), (None, None, -1), (5, 2, 4), (2, 5, 4)],
+)
+def test_invocation_usage_rejects_negative_or_inconsistent_values(
+    values: tuple[int | None, int | None, int | None],
+) -> None:
+    with pytest.raises(ValueError):
+        InvocationUsage(*values)
+
+
+def test_invocation_rejects_invalid_duration() -> None:
+    with pytest.raises(ValueError, match="duration"):
+        Invocation(
+            INVOCATION_ID,
+            TENANT_ID,
+            AGENT_ID,
+            MODEL_ID,
+            InvocationStatus.FAILED,
+            "input",
+            None,
+            STARTED_AT,
+            COMPLETED_AT,
+            DECISION_ID,
+            PRINCIPAL_ID,
+            -1,
+        )
+
+
+def test_sub_millisecond_duration_is_stored_as_zero() -> None:
+    invocation = Invocation.failed(
+        INVOCATION_ID,
+        TENANT_ID,
+        AGENT_ID,
+        MODEL_ID,
+        "input",
+        STARTED_AT,
+        STARTED_AT + timedelta(microseconds=999),
+        DECISION_ID,
+        PRINCIPAL_ID,
+    )
+    assert invocation.duration_ms == 0

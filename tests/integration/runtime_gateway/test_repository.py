@@ -2,6 +2,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -49,6 +51,7 @@ from valor.runtime_gateway.domain.identity import (
     TenantId,
 )
 from valor.runtime_gateway.domain.invocation import Invocation
+from valor.runtime_gateway.domain.usage import InvocationUsage
 from valor.runtime_gateway.infrastructure.admission import PostgresRuntimeAdmission
 from valor.runtime_gateway.infrastructure.unit_of_work import SqlAlchemyInvocationUnitOfWork
 
@@ -128,6 +131,8 @@ def succeeded_invocation(
         COMPLETED_AT,
         DECISION_ID,
         "runtime-principal",
+        InvocationUsage(10, 5, 15),
+        "provider-request-1",
     )
 
 
@@ -168,6 +173,52 @@ async def test_failed_invocation_persists_without_output(runtime_database_url: s
         await unit_of_work.commit()
     async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
         assert await unit_of_work.invocations.get(INVOCATION_ID) == expected
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_legacy_null_telemetry_remains_readable(runtime_database_url: str) -> None:
+    sessions, engine = sessions_for(runtime_database_url)
+    await persist_runtime_references(sessions)
+    async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
+        await unit_of_work.invocations.add(succeeded_invocation())
+        await unit_of_work.commit()
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE invocations SET duration_ms = NULL, input_units = NULL, "
+                "output_units = NULL, total_units = NULL, provider_response_id = NULL "
+                "WHERE id = :id"
+            ),
+            {"id": INVOCATION_ID.value},
+        )
+    async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
+        invocation = await unit_of_work.invocations.get(INVOCATION_ID)
+    assert invocation is not None
+    assert invocation.duration_ms is None
+    assert invocation.usage is None
+    assert invocation.provider_response_id is None
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("column", ["duration_ms", "input_units", "output_units", "total_units"])
+async def test_database_rejects_negative_observability_values(
+    runtime_database_url: str, column: str
+) -> None:
+    sessions, engine = sessions_for(runtime_database_url)
+    await persist_runtime_references(sessions)
+    async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
+        await unit_of_work.invocations.add(succeeded_invocation())
+        await unit_of_work.commit()
+    with pytest.raises(IntegrityError):
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(f"UPDATE invocations SET {column} = -1 WHERE id = :id"),  # noqa: S608
+                {"id": INVOCATION_ID.value},
+            )
     await engine.dispose()
 
 

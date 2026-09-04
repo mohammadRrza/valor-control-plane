@@ -62,6 +62,7 @@ class CreateInvocationHandler:
         self._clock = clock
 
     async def __call__(self, command: CreateInvocationCommand) -> Invocation:
+        started_at = self._clock()
         input_text = validated_input(command.input_text)
         if not await self._tenants.exists(command.tenant_id):
             raise TenantNotAvailable(command.tenant_id)
@@ -75,7 +76,6 @@ class CreateInvocationHandler:
             raise ProviderNotSupportedForRuntime(model.provider)
 
         invocation_id = InvocationId(self._id_factory())
-        started_at = self._clock()
         decision = await self._policy.decide(
             invocation_id=invocation_id,
             tenant_id=command.tenant_id,
@@ -127,6 +127,8 @@ class CreateInvocationHandler:
             self._clock(),
             decision.id,
             command.runtime_principal_id,
+            result.usage,
+            result.provider_response_id,
         )
         await self._persist(succeeded)
         return succeeded

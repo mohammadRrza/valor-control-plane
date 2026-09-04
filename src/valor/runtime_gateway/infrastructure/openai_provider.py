@@ -9,10 +9,20 @@ from valor.runtime_gateway.application.ports import (
     ProviderInvocationResult,
     ProviderTransportError,
 )
+from valor.runtime_gateway.domain.invocation import MAX_PROVIDER_RESPONSE_ID_LENGTH
+from valor.runtime_gateway.domain.usage import InvocationUsage
+
+
+class ResponseUsageValue(Protocol):
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
 
 
 class ResponseValue(Protocol):
+    id: str
     output_text: str
+    usage: ResponseUsageValue | None
 
 
 class ResponsesResource(Protocol):
@@ -57,4 +67,24 @@ class OpenAIResponsesProvider(ModelProviderPort):
             raise ProviderTransportError("OpenAI Responses API request failed.") from error
         if not response.output_text.strip():
             raise ProviderTransportError("OpenAI Responses API returned no text output.")
-        return ProviderInvocationResult(response.output_text)
+        return ProviderInvocationResult(
+            response.output_text,
+            _normalized_usage(response.usage),
+            _provider_response_id(response.id),
+        )
+
+
+def _normalized_usage(value: ResponseUsageValue | None) -> InvocationUsage | None:
+    if value is None:
+        return None
+    try:
+        return InvocationUsage(value.input_tokens, value.output_tokens, value.total_tokens)
+    except (TypeError, ValueError):
+        return None
+
+
+def _provider_response_id(value: str) -> str | None:
+    canonical = value.strip()
+    if not canonical or len(canonical) > MAX_PROVIDER_RESPONSE_ID_LENGTH:
+        return None
+    return canonical

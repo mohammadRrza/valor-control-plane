@@ -12,7 +12,7 @@ flowchart LR
   O[Platform Operators] --> V
 ```
 
-VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 established the operational shell; Phase 1 added Tenant, Agent, and governed Model reference slices. Phase 2 has one synchronous OpenAI path governed by explicit default-deny Agent-to-Model permission decisions, with interim bearer authentication around management APIs; it is neither a complete gateway nor a general policy or identity platform.
+VALOR is the governance and evidence boundary between callers and AI/tool dependencies. Phase 0 established the operational shell; Phase 1 added Tenant, Agent, and governed Model reference slices. Phase 2 has one synchronous OpenAI path governed by explicit default-deny Agent-to-Model permission decisions, with interim bearer authentication around management APIs. Phase 3 begins with persisted provider-neutral Invocation usage facts; VALOR is neither a complete gateway nor a telemetry, policy, or identity platform.
 
 ## Current container and component view
 
@@ -100,7 +100,7 @@ flowchart LR
   RG --> I[(Final Invocation outcome)]
 ```
 
-An Invocation is a VALOR-owned UUID plus Tenant, Agent, and Model IDs, final `succeeded` or `failed` status, text input, optional successful output, and timezone-aware start/completion timestamps. It does not use an upstream request ID as identity and has no token, cost, retry, tracing, policy, tool, or evaluation fields.
+An Invocation is a VALOR-owned UUID plus Tenant, Agent, and Model IDs, final `succeeded`, `failed`, or `denied` status, text input, optional successful output, timezone-aware start/completion timestamps, integer lifecycle duration, optional provider-neutral usage units, and optional safe provider response correlation. Provider response identity is not the Invocation identity. Invocation has no monetary cost, retry, trace/span, tool, or evaluation fields.
 
 Runtime admission uses local identity/projection types and three narrow application ports. A PostgreSQL adapter queries only the published fields required from `tenants`, `agents`, and `models`; Runtime Gateway domain/application code imports no owning-context aggregates, repositories, ORM rows, or infrastructure. This is deliberate shared-schema coupling in the modular monolith. PostgreSQL foreign keys from `invocations` to all three records provide final referential protection without ORM relationships.
 
@@ -115,6 +115,16 @@ but never stores the credential. GET requires all three identities to match and 
 cross-principal access. Legacy rows without authenticated principal evidence are not returned.
 Input and successful output remain persisted but never logged; retention, redaction,
 classification, encryption policy, credential lifecycle, and rate controls remain technical debt.
+
+`duration_ms` is derived once from `completed_at - started_at` and covers Runtime application
+processing from handler entry, before input/resource and policy evaluation, through final denial
+or provider completion/failure. The provider port carries only `InvocationUsage` and
+an optional provider response ID. OpenAI infrastructure maps typed input/output/total token counts
+to provider-neutral units and maps the response ID; malformed optional metadata becomes
+unavailable without failing a successful response. Denied and failed Invocations record duration
+but no fabricated usage or provider response ID. Nullable telemetry keeps legacy rows readable.
+These persisted facts support later reliability and cost attribution, but there is no aggregation,
+exporter, tracing backend, dashboard, alerting, pricing, budget, quota, or rate enforcement.
 
 ### Default-deny Agent-to-Model admission
 
