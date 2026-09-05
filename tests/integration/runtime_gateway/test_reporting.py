@@ -18,6 +18,44 @@ START = datetime(2026, 9, 1, tzinfo=UTC)
 END = START + timedelta(days=1)
 
 
+def agent_id(number: int) -> UUID:
+    return UUID(int=10_000 + number)
+
+
+def model_id(number: int) -> UUID:
+    return UUID(int=20_000 + number)
+
+
+async def seed_asset_pair(connection: AsyncConnection, tenant_id: UUID, number: int) -> None:
+    await connection.execute(
+        text(
+            "INSERT INTO agents (id, tenant_id, name, normalized_name, created_at) "
+            "VALUES (:id, :tenant_id, :name, :normalized_name, :created_at)"
+        ),
+        {
+            "id": agent_id(number),
+            "tenant_id": tenant_id,
+            "name": f"Agent {number}",
+            "normalized_name": f"agent {tenant_id} {number}",
+            "created_at": START,
+        },
+    )
+    await connection.execute(
+        text(
+            "INSERT INTO models (id, tenant_id, name, normalized_name, provider, "
+            "provider_model_reference, created_at) VALUES "
+            "(:id, :tenant_id, :name, :normalized_name, 'openai', 'gpt-test', :created_at)"
+        ),
+        {
+            "id": model_id(number),
+            "tenant_id": tenant_id,
+            "name": f"Model {number}",
+            "normalized_name": f"model {tenant_id} {number}",
+            "created_at": START,
+        },
+    )
+
+
 async def seed_references(connection: AsyncConnection) -> None:
     for tenant_id, suffix in ((TENANT_A, "a"), (TENANT_B, "b")):
         await connection.execute(
@@ -70,14 +108,16 @@ def invocation_values(
     usage: tuple[int, int, int] | None = None,
     cost: Decimal | None = None,
     pricing_version: str | None = None,
+    agent: UUID | None = None,
+    model: UUID | None = None,
 ) -> dict[str, object]:
     suffix = 1 if tenant_id == TENANT_A else 2
     limited = status == "limited"
     return {
         "id": uuid4(),
         "tenant_id": tenant_id,
-        "agent_id": UUID(f"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa{suffix}"),
-        "model_id": UUID(f"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb{suffix}"),
+        "agent_id": agent or UUID(f"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa{suffix}"),
+        "model_id": model or UUID(f"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb{suffix}"),
         "status": status,
         "output_text": "output" if status == "succeeded" else None,
         "started_at": started_at,
@@ -213,4 +253,119 @@ async def test_postgres_report_returns_explicit_zero_aggregates(runtime_database
     assert report.invocations.total == 0
     assert report.usage.total_units == 0
     assert report.estimated_cost.total == Decimal("0.000000000000")
+    assert report.top_agents_by_estimated_cost == ()
+    assert report.top_models_by_estimated_cost == ()
+    assert not report.agent_breakdown_truncated
+    assert not report.model_breakdown_truncated
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_postgres_report_returns_deterministic_bounded_cost_breakdowns(
+    runtime_database_url: str,
+    runtime_client: TestClient,
+) -> None:
+    engine = create_async_engine(runtime_database_url)
+    async with engine.begin() as connection:
+        await seed_references(connection)
+        for number in range(12):
+            await seed_asset_pair(connection, TENANT_A, number)
+            cost = Decimal(number).quantize(Decimal("0.000000000001"))
+            await connection.execute(
+                INSERT_INVOCATION,
+                invocation_values(
+                    "succeeded",
+                    START + timedelta(minutes=number),
+                    usage=(number, number + 1, number * 2 + 1),
+                    cost=cost if number < 10 else None,
+                    pricing_version=f"historical-{number % 2}" if number < 10 else None,
+                    agent=agent_id(number),
+                    model=model_id(number),
+                ),
+            )
+        await connection.execute(
+            INSERT_INVOCATION,
+            invocation_values(
+                "succeeded",
+                START + timedelta(hours=2),
+                agent=agent_id(9),
+                model=model_id(9),
+            ),
+        )
+        await connection.execute(
+            INSERT_INVOCATION,
+            invocation_values(
+                "succeeded",
+                END,
+                usage=(999, 999, 1998),
+                cost=Decimal("999.000000000000"),
+                pricing_version="outside-range",
+                agent=agent_id(11),
+                model=model_id(11),
+            ),
+        )
+        await connection.execute(
+            INSERT_INVOCATION,
+            invocation_values(
+                "succeeded",
+                START,
+                tenant_id=TENANT_B,
+                usage=(999, 999, 1998),
+                cost=Decimal("1000.000000000000"),
+                pricing_version="other-tenant",
+            ),
+        )
+
+    reader = PostgresTenantRuntimeReportReader(async_sessionmaker(engine))
+    report = await reader.get_report(tenant_id=TenantId(TENANT_A), start=START, end=END)
+    expected_agents = [agent_id(number) for number in range(9, -1, -1)]
+    expected_models = [model_id(number) for number in range(9, -1, -1)]
+    assert [row.agent_id for row in report.top_agents_by_estimated_cost] == expected_agents
+    assert [row.model_id for row in report.top_models_by_estimated_cost] == expected_models
+    assert len(report.top_agents_by_estimated_cost) == 10
+    assert len(report.top_models_by_estimated_cost) == 10
+    assert report.agent_breakdown_truncated
+    assert report.model_breakdown_truncated
+
+    leading_agent = report.top_agents_by_estimated_cost[0]
+    assert leading_agent.invocation_count == 2
+    assert leading_agent.total_units == 19
+    assert leading_agent.usage_attributed_invocations == 1
+    assert leading_agent.usage_unavailable_invocations == 1
+    assert leading_agent.estimated_cost_total == Decimal("9.000000000000")
+    assert leading_agent.cost_attributed_invocations == 1
+    assert leading_agent.cost_unavailable_invocations == 1
+
+    zero_agent = report.top_agents_by_estimated_cost[-1]
+    assert zero_agent.agent_id == agent_id(0)
+    assert zero_agent.estimated_cost_total == Decimal("0.000000000000")
+    assert zero_agent.cost_attributed_invocations == 1
+    assert zero_agent.cost_unavailable_invocations == 0
+
+    cast(FastAPI, runtime_client.app).state.settings.security.management_tenant_ids = frozenset(
+        {TENANT_A}
+    )
+    response = runtime_client.get(
+        f"/api/v1/tenants/{TENANT_A}/runtime-report",
+        params={"start": START.isoformat(), "end": END.isoformat()},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["top_agents_by_estimated_cost"]) == 10
+    assert len(payload["top_models_by_estimated_cost"]) == 10
+    assert payload["agent_breakdown_truncated"] is True
+    assert payload["model_breakdown_truncated"] is True
+    assert payload["top_agents_by_estimated_cost"][0] == {
+        "agent_id": str(agent_id(9)),
+        "invocation_count": 2,
+        "total_units": 19,
+        "usage_attributed_invocations": 1,
+        "usage_unavailable_invocations": 1,
+        "estimated_cost_total": "9.000000000000",
+        "cost_attributed_invocations": 1,
+        "cost_unavailable_invocations": 1,
+    }
+    assert "input_text" not in response.text
+    assert "output_text" not in response.text
     await engine.dispose()

@@ -167,8 +167,14 @@ it never loads Invocation rows into application memory and never uses the write 
 Status counts cover succeeded, failed, denied, and limited outcomes. Usage totals include only
 complete persisted usage tuples, with provider-executed, attributed, and unavailable counts.
 Estimated USD cost sums persisted snapshots and exposes attributed/unavailable success counts;
-different historical pricing versions may therefore contribute to one total. The response omits
-prompts, outputs, Invocation IDs, and asset labels. Agent/Model breakdowns, reporting tables,
+different historical pricing versions may therefore contribute to one total.
+
+The same endpoint includes fixed Top 10 Agent and Model breakdowns. PostgreSQL groups directly on
+Invocation `agent_id` and `model_id`, ranks by persisted estimated cost descending, and uses the ID
+ascending as the deterministic tie-break. Each row includes invocation count, known total units,
+and usage/cost completeness. Eleven rows are fetched to determine accurate truncation flags, then
+only ten are exposed. No asset lookup or N+1 query is performed. The response omits prompts,
+outputs, Invocation IDs, names, and provider metadata. Configurable rankings, reporting tables,
 repricing, billing, dashboards, exports, and an analytics store are intentionally absent.
 
 ### Default-deny Agent-to-Model admission

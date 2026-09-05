@@ -210,6 +210,10 @@ def test_tenant_runtime_report_is_management_scoped_and_empty_is_explicit(
             "attributed_invocations": 0,
             "unavailable_invocations": 0,
         },
+        "top_agents_by_estimated_cost": [],
+        "top_models_by_estimated_cost": [],
+        "agent_breakdown_truncated": False,
+        "model_breakdown_truncated": False,
     }
     assert (
         runtime_client.get(f"/api/v1/tenants/{tenant_b}/runtime-report", params=params).status_code

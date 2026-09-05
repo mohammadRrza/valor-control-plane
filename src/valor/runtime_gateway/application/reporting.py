@@ -4,10 +4,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
+from uuid import UUID
 
 from valor.runtime_gateway.domain.identity import TenantId
 
 MAX_REPORT_RANGE = timedelta(days=31)
+TOP_N = 10
 
 
 class InvalidReportRange(Exception):
@@ -50,6 +52,30 @@ class EstimatedCostTotals:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentCostBreakdown:
+    agent_id: UUID
+    invocation_count: int
+    total_units: int
+    usage_attributed_invocations: int
+    usage_unavailable_invocations: int
+    estimated_cost_total: Decimal
+    cost_attributed_invocations: int
+    cost_unavailable_invocations: int
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCostBreakdown:
+    model_id: UUID
+    invocation_count: int
+    total_units: int
+    usage_attributed_invocations: int
+    usage_unavailable_invocations: int
+    estimated_cost_total: Decimal
+    cost_attributed_invocations: int
+    cost_unavailable_invocations: int
+
+
+@dataclass(frozen=True, slots=True)
 class TenantRuntimeReport:
     tenant_id: TenantId
     start: datetime
@@ -57,6 +83,10 @@ class TenantRuntimeReport:
     invocations: InvocationCounts
     usage: UsageTotals
     estimated_cost: EstimatedCostTotals
+    top_agents_by_estimated_cost: tuple[AgentCostBreakdown, ...] = ()
+    top_models_by_estimated_cost: tuple[ModelCostBreakdown, ...] = ()
+    agent_breakdown_truncated: bool = False
+    model_breakdown_truncated: bool = False
 
 
 class TenantRuntimeReportReaderPort(Protocol):

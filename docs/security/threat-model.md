@@ -105,6 +105,12 @@ depends on provider telemetry and pricing attribution, estimates are not invoice
 Invocation retention still exists, there is no report audit trail or budget enforcement, and static
 Management credentials remain broad within their configured Tenant set.
 
+Fixed Top 10 Agent and Model cost rankings let authorized operators identify which governed asset
+identities drive estimated cost without inspecting Invocation content. Rows contain only IDs and
+aggregates and remain inside the same Tenant/time filter. IDs require external authorized context
+to interpret, visibility is intentionally limited to ten identities per dimension, missing
+telemetry affects completeness, and reporting still has no access audit trail or budget enforcement.
+
 ### Application to PostgreSQL
 
 PostgreSQL constraints protect ownership foreign keys, unique identities, permission tuples, and

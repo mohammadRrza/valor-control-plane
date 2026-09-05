@@ -130,8 +130,10 @@ system. Usage telemetry does not solve sensitive-data retention.
 Pricing entries are optional static configuration. Missing pricing or incomplete usage leaves
 `estimated_cost` null without blocking successful execution. The Management endpoint
 `GET /api/v1/tenants/{tenant_id}/runtime-report?start=...&end=...` aggregates persisted usage and
-estimated cost over a required UTC-aware half-open range of at most 31 days. It does not reprice
-history. No monetary budget, billing, pricing synchronization, or historical backfill is implemented.
+estimated cost over a required UTC-aware half-open range of at most 31 days. It also returns fixed
+Top 10 Agent and Model lists ranked by persisted estimated cost, with UUID tie-breaks and
+completeness counts. It does not reprice history. No configurable ranking, monetary budget,
+billing, pricing synchronization, or historical backfill is implemented.
 
 The [initial threat model](docs/security/threat-model.md) documents current trust boundaries,
 material risks, and the recommended security sequence. The roadmap is documented in
