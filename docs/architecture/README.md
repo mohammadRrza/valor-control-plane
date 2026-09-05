@@ -53,6 +53,14 @@ The application is one deployable process. Operational routes are outside domain
 | Incident Management | detection and response lifecycle | consumes violations, SLOs and evaluation failures |
 | Compliance & Audit | immutable decision evidence | consumes explicit integration events/contracts |
 
+Phase 4.0 realizes the first narrow part of Compliance & Audit as `management_audit`. A successful
+Agent-to-Model permission upsert and its append-only audit record share one local PostgreSQL
+transaction. The evidence stores identities and canonical SHA-256 state fingerprints, never the
+request payload or bearer credential. Audit reads are Management-authenticated, exactly
+Tenant-scoped, and bounded to an aware `[start, end)` range of at most 31 days and 100 rows.
+No-op PUTs remain auditable with equal before/after fingerprints. Failed attempts, static budget
+configuration edits, WORM storage, export, retention, and SIEM integration are not implemented.
+
 These are domain boundaries, not services. Identity & Tenancy supports Tenant creation/retrieval; AI Asset Registry supports Agent and Model registration/retrieval; Runtime Gateway supports one synchronous OpenAI Invocation; Policy & Risk supports one exact Agent-to-Model permission and decision history. Each context owns its architectural layers. Cross-context access uses explicit contracts rather than imports into another context's internals.
 
 ### Tenant slice decisions

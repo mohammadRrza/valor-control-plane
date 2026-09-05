@@ -6,9 +6,13 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 ## Status
 
-**Current phase: Phase 3 — Usage and observability foundation (in progress).**
+**Current phase: Phase 4 — Management governance evidence (in progress).**
 
 Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; static management authentication and Tenant authorization; separate static Runtime Principal authentication with Invocation read isolation; persisted Invocation duration, normalized provider usage, safe provider response correlation, immutable estimated-cost snapshots; bounded Tenant-scoped Runtime usage/cost reporting; and sequential Tenant daily estimated-cost budget enforcement.
+
+Successful Agent-to-Model permission PUTs append actor-correlated, fingerprint-only Management
+audit evidence in the same PostgreSQL transaction. Static Tenant budget file changes remain outside
+VALOR's observable Management API and are not audited.
 
 Each Runtime Principal also requires an explicit UTC-daily total-unit limit and per-invocation
 allowance. After policy ALLOW, provider execution requires `known consumed total_units + allowance
@@ -71,6 +75,7 @@ POST /api/v1/runtime/invocations  # body: model_id + input; Tenant/Agent come fr
 GET  /api/v1/runtime/invocations/{invocation_id}
 PUT  /api/v1/policies/agent-model-permissions
 GET  /api/v1/policies/agent-model-permissions/{permission_id}
+GET  /api/v1/tenants/{tenant_id}/audit-records?start=...&end=...&limit=50
 ```
 
 ## Repository layout
@@ -100,6 +105,11 @@ src/valor/
     application/    permission set/get and default-deny evaluation
     infrastructure/ PostgreSQL policy persistence/admission/runtime adapter
     presentation/   permission HTTP contracts, routes, and errors
+  management_audit/
+    domain/         immutable audit evidence and canonical fingerprints
+    application/    bounded Tenant audit query and reader port
+    infrastructure/ append-only persistence and PostgreSQL reader
+    presentation/   Tenant-scoped audit records route and errors
   security/
     application/    authenticated principal and explicit Tenant authorization rule
     presentation/   bearer parsing, constant-time validation, and HTTP error mapping

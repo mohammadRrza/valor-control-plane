@@ -9,6 +9,7 @@ from valor.ai_asset_registry.infrastructure.models import AgentRow, ModelRow
 from valor.bootstrap.settings import get_settings
 from valor.identity_tenancy.infrastructure.models import TenantRow
 from valor.infrastructure.sqlalchemy import SqlAlchemyBase
+from valor.management_audit.infrastructure.models import ManagementAuditRecordRow
 from valor.policy_risk.infrastructure.models import AgentModelPermissionRow, PolicyDecisionRow
 from valor.runtime_gateway.infrastructure.models import InvocationRow
 
@@ -19,6 +20,7 @@ _mapped_rows = (
     AgentModelPermissionRow,
     PolicyDecisionRow,
     InvocationRow,
+    ManagementAuditRecordRow,
 )
 
 config = context.config

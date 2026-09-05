@@ -64,6 +64,7 @@ def test_business_context_cores_do_not_depend_on_security_transport() -> None:
         "ai_asset_registry",
         "runtime_gateway",
         "policy_risk",
+        "management_audit",
     ):
         context = SOURCE / "valor" / context_name
         for layer in ("domain", "application"):
@@ -74,3 +75,14 @@ def test_business_context_cores_do_not_depend_on_security_transport() -> None:
                             f"{path.relative_to(SOURCE)}:{line} imports {imported_module}"
                         )
     assert not violations, "Security transport imports in business core:\n" + "\n".join(violations)
+
+
+def test_management_audit_domain_is_independent_of_governed_contexts() -> None:
+    context = SOURCE / "valor" / "management_audit" / "domain"
+    forbidden = ("valor.policy_risk", "valor.runtime_gateway")
+    violations: list[str] = []
+    for path in context.rglob("*.py"):
+        for imported_module, line in imports_in(SOURCE, path):
+            if imported_module.startswith(forbidden):
+                violations.append(f"{path.relative_to(SOURCE)}:{line} imports {imported_module}")
+    assert not violations, "Cross-context audit-domain imports:\n" + "\n".join(violations)

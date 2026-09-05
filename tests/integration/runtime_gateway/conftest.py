@@ -63,6 +63,7 @@ def runtime_database_url() -> str:
 async def clean_runtime_tables(runtime_database_url: str) -> AsyncIterator[None]:
     engine = create_async_engine(runtime_database_url)
     async with engine.begin() as connection:
+        await connection.execute(text("DELETE FROM management_audit_records"))
         await connection.execute(text("DELETE FROM invocations"))
         await connection.execute(text("DELETE FROM policy_decisions"))
         await connection.execute(text("DELETE FROM agent_model_permissions"))
@@ -71,6 +72,7 @@ async def clean_runtime_tables(runtime_database_url: str) -> AsyncIterator[None]
         await connection.execute(text("DELETE FROM tenants"))
     yield
     async with engine.begin() as connection:
+        await connection.execute(text("DELETE FROM management_audit_records"))
         await connection.execute(text("DELETE FROM invocations"))
         await connection.execute(text("DELETE FROM policy_decisions"))
         await connection.execute(text("DELETE FROM agent_model_permissions"))

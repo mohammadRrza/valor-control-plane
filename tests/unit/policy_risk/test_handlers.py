@@ -5,6 +5,7 @@ from uuid import UUID
 
 import pytest
 
+from valor.management_audit.domain.audit_record import ManagementAuditRecord
 from valor.policy_risk.application.errors import (
     PolicyAgentNotAvailable,
     PolicyModelNotAvailable,
@@ -65,10 +66,19 @@ class DecisionRepo:
         self.items.append(decision)
 
 
+class AuditRepo:
+    def __init__(self) -> None:
+        self.items: list[ManagementAuditRecord] = []
+
+    async def append(self, record: ManagementAuditRecord) -> None:
+        self.items.append(record)
+
+
 class Uow:
     def __init__(self) -> None:
         self.permissions = PermissionRepo()
         self.decisions = DecisionRepo()
+        self.audits = AuditRepo()
         self.commits = 0
         self.entered = 0
 
@@ -120,9 +130,10 @@ async def test_set_same_tenant_permission_commits() -> None:
         admission,
         id_factory=lambda: PERMISSION_UUID,
         clock=lambda: NOW,
-    )(SetAgentModelPermissionCommand(TENANT, AGENT, MODEL, PolicyEffect.ALLOW))
+    )(SetAgentModelPermissionCommand(TENANT, AGENT, MODEL, PolicyEffect.ALLOW, "operator-1"))
     assert result.effect is PolicyEffect.ALLOW
     assert uow.commits == 1
+    assert uow.audits.items[0].principal_id == "operator-1"
 
 
 @pytest.mark.asyncio
@@ -141,7 +152,7 @@ async def test_invalid_or_cross_tenant_resources_do_not_commit(failure: str) -> 
         expected = PolicyModelNotAvailable
     with pytest.raises(expected):
         await SetAgentModelPermissionHandler(uow, admission, admission, admission)(
-            SetAgentModelPermissionCommand(TENANT, AGENT, MODEL, PolicyEffect.ALLOW)
+            SetAgentModelPermissionCommand(TENANT, AGENT, MODEL, PolicyEffect.ALLOW, "operator-1")
         )
     assert uow.commits == 0
 

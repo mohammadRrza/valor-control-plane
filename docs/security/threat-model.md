@@ -136,8 +136,10 @@ Management authentication and Tenant authorization prevent anonymous or cross-Te
 mutation. Runtime admission remains default-deny: absence of permission and explicit DENY prevent
 provider execution.
 
-Residual threats include a stolen authorized credential, repudiation because permission changes
-have no durable management actor record, and lack of permission history or approval workflow.
+Successful permission changes now retain the stable Management principal ID and before/after state
+fingerprints atomically with the mutation. Residual threats include a stolen authorized credential,
+failed attempts that are not durably audited, database-superuser tampering, and lack of approval or
+cryptographic evidence chaining. Credentials and full request payloads are never audit fields.
 
 ## STRIDE-oriented threat register
 
@@ -147,7 +149,7 @@ have no durable management actor record, and lack of permission history or appro
 | Spoofing | Management principal impersonation | Static bearer authentication, constant-time comparison | High | Rotation and multiple federated principals |
 | Tampering | Unauthorized policy mutation | Management auth, exact Tenant scope, DB constraints | Medium | Management mutation audit/history |
 | Tampering | Direct Invocation/Decision changes | DB access boundary and constraints | High if DB compromised | Restricted DB roles and tamper-evident evidence |
-| Repudiation | Operator denies changing a permission | Stable principal exists only in request boundary | Medium | Persist management action evidence |
+| Repudiation | Operator denies changing a permission | Successful PUT stores principal/resource/time and state fingerprints atomically | Mitigated; shared credentials and DB tampering remain Medium | Individual managed identities and protected audit storage |
 | Information disclosure | Cross-principal Runtime GET reveals prompt/response | Exact principal/Tenant/Agent correlation and non-disclosing 404 | Mitigated; stored-data risk remains High/Medium | Retention, redaction, encryption policy |
 | Information disclosure | Database/backup reveals prompt/response | Infrastructure access boundary | High/Medium | Retention, redaction, classification, encryption policy |
 | Denial of service | Runtime exhausts connections/provider capacity | Provider timeout | High/Medium | Identity-aware limits and concurrency controls |
@@ -180,13 +182,14 @@ Implemented strengths:
 - persisted duration, normalized usage attribution, and safe provider response correlation;
 - provider-secret isolation and sanitized upstream failures;
 - PostgreSQL integrity constraints and explicit transactions.
+- atomic actor-correlated audit evidence for successful Agent-to-Model permission changes.
 
 Material gaps:
 
 1. Static runtime credential lifecycle, theft, replay, rotation, and revocation — High.
 2. Sensitive Invocation data retention/redaction policy — High/Medium.
 3. Concurrency-safe reservations, request-rate limits, and tenant budgets — Medium.
-4. Individual management accountability and policy-change audit — Medium.
+4. Individual Management identity lifecycle, failed-attempt audit, and protected evidence storage — Medium.
 
 ## Recommended sequence
 

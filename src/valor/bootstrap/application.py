@@ -20,6 +20,9 @@ from valor.bootstrap.settings import Settings, get_settings
 from valor.identity_tenancy.infrastructure.unit_of_work import SqlAlchemyTenantUnitOfWork
 from valor.identity_tenancy.presentation.errors import install_identity_tenancy_error_handlers
 from valor.identity_tenancy.presentation.routes import router as tenant_router
+from valor.management_audit.infrastructure.repositories import PostgresManagementAuditReader
+from valor.management_audit.presentation.errors import install_management_audit_error_handlers
+from valor.management_audit.presentation.routes import router as management_audit_router
 from valor.policy_risk.infrastructure.admission import PostgresPolicyAdmission
 from valor.policy_risk.infrastructure.runtime_policy import RuntimePolicyAdapter
 from valor.policy_risk.infrastructure.unit_of_work import SqlAlchemyPolicyUnitOfWork
@@ -72,6 +75,7 @@ def create_app(
         app.state.tenant_cost_reader = PostgresTenantEstimatedCostReader(database.sessions)
         app.state.policy_uow_factory = partial(SqlAlchemyPolicyUnitOfWork, database.sessions)
         app.state.policy_admission = PostgresPolicyAdmission(database.sessions)
+        app.state.management_audit_reader = PostgresManagementAuditReader(database.sessions)
         app.state.runtime_policy = RuntimePolicyAdapter(app.state.policy_uow_factory)
         api_key = resolved.provider.openai_api_key
         api_key_value = api_key.get_secret_value() if api_key is not None else None
@@ -97,10 +101,12 @@ def create_app(
     app.include_router(runtime_router, prefix="/api/v1")
     app.include_router(runtime_reporting_router, prefix="/api/v1")
     app.include_router(policy_router, prefix="/api/v1", dependencies=management_auth)
+    app.include_router(management_audit_router, prefix="/api/v1", dependencies=management_auth)
     install_error_handlers(app)
     install_identity_tenancy_error_handlers(app)
     install_ai_asset_registry_error_handlers(app)
     install_runtime_gateway_error_handlers(app)
     install_policy_error_handlers(app)
+    install_management_audit_error_handlers(app)
     install_security_error_handlers(app)
     return app
