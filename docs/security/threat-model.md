@@ -90,26 +90,36 @@ Implemented controls:
 Residual threats include credential theft, provider outage, malicious output, latency, concurrent
 usage-limit overshoot, unknown consumption when provider telemetry is absent, and cost abuse. The
 sequential per-principal limit improves basic containment, but there are no request-rate limits,
-tenant budgets, automatic credential revocation, alerting, or monetary enforcement.
+automatic credential revocation, alerting, or strict monetary reservation.
 
 Configured pricing improves deterministic attribution but is not invoice-reconciled. Missing usage
-or pricing prevents attribution, and there is no monetary budget, cost-based blocking, provider
-price synchronization, aggregate tenant budget, or managed pricing history outside Invocation
-snapshots.
+or pricing prevents attribution, and there is no provider price synchronization, managed pricing
+history outside Invocation snapshots, or invoice-authoritative enforcement.
 
 Tenant-scoped Runtime reports let authorized Management operators inspect aggregate status, known
 usage, and estimated cost without retrieving individual prompts or outputs. Existing non-disclosing
 Tenant authorization prevents UUID knowledge from exposing another Tenant's aggregates, and the
 required 31-day maximum range limits accidental broad scans. Residual risk remains: completeness
 depends on provider telemetry and pricing attribution, estimates are not invoice truth, raw
-Invocation retention still exists, there is no report audit trail or budget enforcement, and static
+Invocation retention still exists, there is no report audit trail, and static
 Management credentials remain broad within their configured Tenant set.
 
 Fixed Top 10 Agent and Model cost rankings let authorized operators identify which governed asset
 identities drive estimated cost without inspecting Invocation content. Rows contain only IDs and
 aggregates and remain inside the same Tenant/time filter. IDs require external authorized context
 to interpret, visibility is intentionally limited to ten identities per dimension, missing
-telemetry affects completeness, and reporting still has no access audit trail or budget enforcement.
+telemetry affects completeness, and reporting still has no access audit trail.
+
+Static Tenant daily estimated-cost budgets now prevent additional sequential provider execution
+when known persisted attributed cost plus a configured allowance exceeds the boundary. Missing
+budget configuration and cost-ledger failures fail closed, and monetary denials retain immutable
+decision evidence without provider execution.
+
+This does not strictly cap financial spend. Estimated cost can differ from invoices, unattributed
+provider executions are excluded, one request can cost more than its allowance, and concurrent
+requests can pass the same pre-check and overshoot collectively. There are no reservations,
+monetary alerts, monthly budgets, dynamic budget management, or invoice reconciliation. Existing
+static credential risks remain.
 
 ### Application to PostgreSQL
 

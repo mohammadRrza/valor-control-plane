@@ -6,12 +6,15 @@ from fastapi.responses import JSONResponse
 from valor.api.errors import problem_response
 from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
+    InvocationCostLimited,
     InvocationDenied,
     InvocationNotFound,
     InvocationUsageLimited,
     ModelNotAvailable,
     ProviderInvocationFailed,
     ProviderNotSupportedForRuntime,
+    TenantCostBudgetCheckUnavailable,
+    TenantCostBudgetConfigurationUnavailable,
     TenantNotAvailable,
     UsageLimitUnavailable,
 )
@@ -151,3 +154,36 @@ def install_runtime_gateway_error_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Runtime usage could not be verified safely.",
         )
+
+    @app.exception_handler(InvocationCostLimited)
+    async def invocation_cost_limited(request: Request, exc: InvocationCostLimited) -> JSONResponse:
+        return problem_response(
+            request,
+            title="Tenant Estimated-Cost Budget Reached",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Tenant estimated-cost allowance for the current window has been exhausted.",
+            invocation_id=exc.invocation_id.value,
+            window_end=exc.window_end,
+        )
+
+    async def cost_budget_unavailable(request: Request) -> JSONResponse:
+        return problem_response(
+            request,
+            title="Tenant Cost Budget Check Unavailable",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Tenant estimated-cost budget enforcement is temporarily unavailable.",
+        )
+
+    @app.exception_handler(TenantCostBudgetConfigurationUnavailable)
+    async def cost_budget_configuration_unavailable(
+        request: Request, exc: TenantCostBudgetConfigurationUnavailable
+    ) -> JSONResponse:
+        del exc
+        return await cost_budget_unavailable(request)
+
+    @app.exception_handler(TenantCostBudgetCheckUnavailable)
+    async def cost_budget_check_unavailable(
+        request: Request, exc: TenantCostBudgetCheckUnavailable
+    ) -> JSONResponse:
+        del exc
+        return await cost_budget_unavailable(request)

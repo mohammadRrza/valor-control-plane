@@ -9,7 +9,7 @@ This direction is intentionally revisable as architecture and product evidence e
 5. **Phase 4 — Policy & Risk:** first explicit Agent-to-Model permission and persisted decision slice implemented early; administration is authenticated and statically Tenant-scoped; dynamic grants, richer conditions, and explainable policy evolution remain planned.
 6. **Phase 5 — MCP/Tool Governance:** tool authorization and human approvals.
 7. **Phase 6 — Evaluation:** quality suites and deployment gates.
-8. **Phase 7 — AI FinOps:** usage facts, sequential UTC-daily Runtime Principal enforcement, immutable Invocation-level estimated USD cost snapshots, and read-only Tenant aggregation are implemented early. Invoice reconciliation, pricing lifecycle/sync, monetary budgets, strict concurrent quotas, and broader cost controls remain planned.
+8. **Phase 7 — AI FinOps:** usage facts, sequential UTC-daily Runtime Principal enforcement, immutable Invocation-level estimated USD cost snapshots, read-only Tenant aggregation, and static sequential Tenant daily estimated-cost budgets are implemented early. Invoice reconciliation, pricing lifecycle/sync, budget CRUD, monthly budgets, reservation accounting, strict concurrent quotas, and broader cost controls remain planned.
 9. **Phase 8 — Incidents:** detection, response, and automated containment.
 10. **Phase 9 — Compliance:** durable audit evidence and reporting.
 11. **Phase 10 — Broker/outbox:** Kafka or Redpanda only when event volume and consumers justify it.

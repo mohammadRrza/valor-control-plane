@@ -8,7 +8,7 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 **Current phase: Phase 3 — Usage and observability foundation (in progress).**
 
-Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; static management authentication and Tenant authorization; separate static Runtime Principal authentication with Invocation read isolation; persisted Invocation duration, normalized provider usage, safe provider response correlation, immutable estimated-cost snapshots; and bounded Tenant-scoped Runtime usage/cost reporting.
+Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; static management authentication and Tenant authorization; separate static Runtime Principal authentication with Invocation read isolation; persisted Invocation duration, normalized provider usage, safe provider response correlation, immutable estimated-cost snapshots; bounded Tenant-scoped Runtime usage/cost reporting; and sequential Tenant daily estimated-cost budget enforcement.
 
 Each Runtime Principal also requires an explicit UTC-daily total-unit limit and per-invocation
 allowance. After policy ALLOW, provider execution requires `known consumed total_units + allowance
@@ -124,16 +124,26 @@ Invocation input and output text are currently persisted for this first runtime/
 
 Invocation responses also expose integer lifecycle duration, provider-neutral input/output/total
 usage units when supplied, and a sanitized provider response identifier when available. These are
-durable attribution facts, not a metrics, tracing, pricing, billing, budget, quota, or abuse-control
-system. Usage telemetry does not solve sensitive-data retention.
+durable attribution facts, not a metrics, tracing, pricing, billing, generalized budget, quota, or
+abuse-control system. Usage telemetry does not solve sensitive-data retention.
 
 Pricing entries are optional static configuration. Missing pricing or incomplete usage leaves
 `estimated_cost` null without blocking successful execution. The Management endpoint
 `GET /api/v1/tenants/{tenant_id}/runtime-report?start=...&end=...` aggregates persisted usage and
 estimated cost over a required UTC-aware half-open range of at most 31 days. It also returns fixed
 Top 10 Agent and Model lists ranked by persisted estimated cost, with UUID tie-breaks and
-completeness counts. It does not reprice history. No configurable ranking, monetary budget,
-billing, pricing synchronization, or historical backfill is implemented.
+completeness counts. It does not reprice history. No configurable ranking, billing, pricing
+synchronization, or historical backfill is implemented.
+
+Runtime execution requires an explicit static Tenant budget entry. After policy and usage-limit
+checks, VALOR sums known persisted `cost_total` snapshots for the current UTC day and permits the
+provider only when `known cost + per-invocation allowance <= daily budget`. Missing configuration
+or an unavailable cost read fails closed. A monetary rejection returns 429 and persists a distinct
+`cost_limited` Invocation with the evaluated decision evidence.
+
+Warning: VALOR's Tenant budget is enforced against known persisted estimated-cost attribution. It
+does not guarantee that actual provider invoice spend cannot exceed the configured value. Missing
+attribution, one-request overshoot, and concurrent overshoot remain possible.
 
 The [initial threat model](docs/security/threat-model.md) documents current trust boundaries,
 material risks, and the recommended security sequence. The roadmap is documented in

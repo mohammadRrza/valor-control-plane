@@ -31,6 +31,7 @@ class InvocationCounts:
     failed: int
     denied: int
     limited: int
+    cost_limited: int
 
 
 @dataclass(frozen=True, slots=True)

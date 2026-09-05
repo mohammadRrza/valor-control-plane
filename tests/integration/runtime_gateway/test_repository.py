@@ -244,6 +244,57 @@ async def test_failed_invocation_persists_without_output(runtime_database_url: s
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_cost_limited_invocation_round_trips_exact_budget_evidence(
+    runtime_database_url: str,
+) -> None:
+    sessions, engine = sessions_for(runtime_database_url)
+    await persist_runtime_references(sessions)
+    expected = Invocation.cost_limited(
+        INVOCATION_ID,
+        TenantId(TENANT_UUID),
+        AgentId(AGENT_UUID),
+        ModelId(MODEL_UUID),
+        "input",
+        STARTED_AT,
+        COMPLETED_AT,
+        DECISION_ID,
+        "runtime-principal",
+        consumed=Decimal("9.000000000001"),
+        limit=Decimal("10.000000000000"),
+        allowance=Decimal("1.000000000000"),
+        window_start=STARTED_AT.replace(hour=0, minute=0, second=0, microsecond=0),
+        window_end=STARTED_AT.replace(hour=0, minute=0, second=0, microsecond=0)
+        + timedelta(days=1),
+    )
+    async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
+        await unit_of_work.invocations.add(expected)
+        await unit_of_work.commit()
+    async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
+        assert await unit_of_work.invocations.get(INVOCATION_ID) == expected
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_database_rejects_budget_evidence_on_non_cost_limited_invocation(
+    runtime_database_url: str,
+) -> None:
+    sessions, engine = sessions_for(runtime_database_url)
+    await persist_runtime_references(sessions)
+    async with SqlAlchemyInvocationUnitOfWork(sessions) as unit_of_work:
+        await unit_of_work.invocations.add(succeeded_invocation())
+        await unit_of_work.commit()
+    with pytest.raises(IntegrityError):
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("UPDATE invocations SET cost_budget_consumed = 1 WHERE id = :id"),
+                {"id": INVOCATION_ID.value},
+            )
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_legacy_null_telemetry_remains_readable(runtime_database_url: str) -> None:
     sessions, engine = sessions_for(runtime_database_url)
     await persist_runtime_references(sessions)

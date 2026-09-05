@@ -70,6 +70,32 @@ class PricingSettings(BaseModel):
         return self
 
 
+class TenantBudgetEntrySettings(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    tenant_id: UUID
+    daily_estimated_cost_budget: Decimal = Field(gt=0, max_digits=30, decimal_places=12)
+    per_invocation_cost_allowance: Decimal = Field(gt=0, max_digits=30, decimal_places=12)
+    currency: Literal["USD"] = "USD"
+
+    @model_validator(mode="after")
+    def allowance_must_fit_budget(self) -> "TenantBudgetEntrySettings":
+        if self.per_invocation_cost_allowance > self.daily_estimated_cost_budget:
+            raise ValueError("Tenant cost allowance must not exceed its daily budget.")
+        return self
+
+
+class TenantBudgetSettings(BaseModel):
+    entries: tuple[TenantBudgetEntrySettings, ...] = ()
+
+    @model_validator(mode="after")
+    def reject_duplicate_tenants(self) -> "TenantBudgetSettings":
+        tenant_ids = [entry.tenant_id for entry in self.entries]
+        if len(tenant_ids) != len(set(tenant_ids)):
+            raise ValueError("Tenant cost budget IDs must be unique.")
+        return self
+
+
 class SecuritySettings(BaseModel):
     management_principal_id: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
@@ -130,6 +156,7 @@ class Settings(BaseSettings):
     observability: ObservabilitySettings = ObservabilitySettings()
     provider: ProviderSettings = ProviderSettings()
     pricing: PricingSettings = PricingSettings()
+    tenant_budgets: TenantBudgetSettings = TenantBudgetSettings()
     security: SecuritySettings
     runtime_auth: RuntimeAuthenticationSettings
 

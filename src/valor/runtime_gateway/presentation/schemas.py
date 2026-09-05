@@ -70,6 +70,11 @@ class InvocationResponse(BaseModel):
     usage_window_start: datetime | None
     usage_window_end: datetime | None
     estimated_cost: InvocationCostResponse | None
+    cost_budget_consumed: str | None
+    cost_budget_limit: str | None
+    cost_budget_allowance: str | None
+    cost_budget_window_start: datetime | None
+    cost_budget_window_end: datetime | None
 
     @classmethod
     def from_domain(cls, invocation: Invocation) -> "InvocationResponse":
@@ -100,4 +105,21 @@ class InvocationResponse(BaseModel):
                 if invocation.estimated_cost
                 else None
             ),
+            cost_budget_consumed=(
+                format(invocation.cost_budget_consumed, ".12f")
+                if invocation.cost_budget_consumed is not None
+                else None
+            ),
+            cost_budget_limit=(
+                format(invocation.cost_budget_limit, ".12f")
+                if invocation.cost_budget_limit is not None
+                else None
+            ),
+            cost_budget_allowance=(
+                format(invocation.cost_budget_allowance, ".12f")
+                if invocation.cost_budget_allowance is not None
+                else None
+            ),
+            cost_budget_window_start=invocation.cost_budget_window_start,
+            cost_budget_window_end=invocation.cost_budget_window_end,
         )

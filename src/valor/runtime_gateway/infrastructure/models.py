@@ -15,7 +15,8 @@ class InvocationRow(SqlAlchemyBase):
     __table_args__ = (
         CheckConstraint(
             "(status = 'succeeded' AND output_text IS NOT NULL) OR "
-            "(status IN ('failed', 'denied', 'limited') AND output_text IS NULL)",
+            "(status IN ('failed', 'denied', 'limited', 'cost_limited') "
+            "AND output_text IS NULL)",
             name="ck_invocations_status_output",
         ),
         CheckConstraint("duration_ms >= 0", name="ck_invocations_duration_non_negative"),
@@ -57,6 +58,21 @@ class InvocationRow(SqlAlchemyBase):
             "AND pricing_basis_units > 0 AND pricing_input_rate >= 0 "
             "AND pricing_output_rate >= 0)",
             name="ck_invocations_cost_snapshot_complete",
+        ),
+        CheckConstraint(
+            "(status = 'cost_limited' AND cost_budget_consumed IS NOT NULL "
+            "AND cost_budget_limit IS NOT NULL AND cost_budget_allowance IS NOT NULL "
+            "AND cost_budget_window_start IS NOT NULL AND cost_budget_window_end IS NOT NULL "
+            "AND cost_budget_consumed >= 0 AND cost_budget_limit > 0 "
+            "AND cost_budget_allowance > 0 AND cost_budget_allowance <= cost_budget_limit "
+            "AND cost_budget_consumed + cost_budget_allowance > cost_budget_limit "
+            "AND cost_budget_window_end > cost_budget_window_start "
+            "AND input_units IS NULL AND output_units IS NULL AND total_units IS NULL "
+            "AND provider_response_id IS NULL AND cost_total IS NULL) OR "
+            "(status <> 'cost_limited' AND cost_budget_consumed IS NULL "
+            "AND cost_budget_limit IS NULL AND cost_budget_allowance IS NULL "
+            "AND cost_budget_window_start IS NULL AND cost_budget_window_end IS NULL)",
+            name="ck_invocations_cost_budget_evidence",
         ),
     )
 
@@ -105,3 +121,12 @@ class InvocationRow(SqlAlchemyBase):
     pricing_basis_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pricing_input_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 12), nullable=True)
     pricing_output_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 12), nullable=True)
+    cost_budget_consumed: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    cost_budget_limit: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    cost_budget_allowance: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    cost_budget_window_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cost_budget_window_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

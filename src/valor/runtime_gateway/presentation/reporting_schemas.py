@@ -14,6 +14,7 @@ class InvocationCountsResponse(BaseModel):
     failed: int
     denied: int
     limited: int
+    cost_limited: int
 
 
 class UsageTotalsResponse(BaseModel):
@@ -78,6 +79,7 @@ class TenantRuntimeReportResponse(BaseModel):
                 failed=report.invocations.failed,
                 denied=report.invocations.denied,
                 limited=report.invocations.limited,
+                cost_limited=report.invocations.cost_limited,
             ),
             usage=UsageTotalsResponse(
                 input_units=report.usage.input_units,

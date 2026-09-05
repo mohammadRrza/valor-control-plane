@@ -22,6 +22,8 @@ from valor.runtime_gateway.application.ports import (
     ModelRuntimeLookupPort,
     RuntimePolicyDecisionPort,
     RuntimeUsageReaderPort,
+    TenantCostBudgetPort,
+    TenantEstimatedCostReaderPort,
     TenantRuntimeLookupPort,
 )
 from valor.runtime_gateway.application.unit_of_work import InvocationUnitOfWork
@@ -70,6 +72,14 @@ def invocation_pricing(request: Request) -> InvocationPricingPort:
     return cast(InvocationPricingPort, request.app.state.invocation_pricing)
 
 
+def tenant_cost_budgets(request: Request) -> TenantCostBudgetPort:
+    return cast(TenantCostBudgetPort, request.app.state.tenant_cost_budgets)
+
+
+def tenant_cost_reader(request: Request) -> TenantEstimatedCostReaderPort:
+    return cast(TenantEstimatedCostReaderPort, request.app.state.tenant_cost_reader)
+
+
 router = APIRouter(prefix="/runtime/invocations", tags=["runtime"])
 
 
@@ -86,11 +96,22 @@ async def create_invocation(
     policy: Annotated[RuntimePolicyDecisionPort, Depends(runtime_policy)],
     usage_reader: Annotated[RuntimeUsageReaderPort, Depends(runtime_usage_reader)],
     pricing: Annotated[InvocationPricingPort, Depends(invocation_pricing)],
+    budgets: Annotated[TenantCostBudgetPort, Depends(tenant_cost_budgets)],
+    cost_reader: Annotated[TenantEstimatedCostReaderPort, Depends(tenant_cost_reader)],
     principal: Annotated[RuntimePrincipal, Depends(require_runtime_principal)],
 ) -> InvocationResponse:
     tenants, agents, models = admission
     invocation = await CreateInvocationHandler(
-        unit_of_work, tenants, agents, models, provider, policy, usage_reader, pricing
+        unit_of_work,
+        tenants,
+        agents,
+        models,
+        provider,
+        policy,
+        usage_reader,
+        pricing,
+        budgets,
+        cost_reader,
     )(
         CreateInvocationCommand(
             principal.principal_id,

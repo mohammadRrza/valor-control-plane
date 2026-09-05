@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from enum import StrEnum
 
 from valor.runtime_gateway.domain.cost import InvocationCost
@@ -24,6 +25,7 @@ class InvocationStatus(StrEnum):
     FAILED = "failed"
     DENIED = "denied"
     LIMITED = "limited"
+    COST_LIMITED = "cost_limited"
 
 
 def validated_input(value: str) -> str:
@@ -59,6 +61,11 @@ class Invocation:
     usage_window_start: datetime | None = None
     usage_window_end: datetime | None = None
     estimated_cost: InvocationCost | None = None
+    cost_budget_consumed: Decimal | None = None
+    cost_budget_limit: Decimal | None = None
+    cost_budget_allowance: Decimal | None = None
+    cost_budget_window_start: datetime | None = None
+    cost_budget_window_end: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "input_text", validated_input(self.input_text))
@@ -123,6 +130,44 @@ class Invocation:
                 raise ValueError("Usage-limit window end must follow its start.")
         elif any(value is not None for value in evidence):
             raise ValueError("Usage-limit evidence belongs only to a limited Invocation.")
+        cost_budget_evidence = (
+            self.cost_budget_consumed,
+            self.cost_budget_limit,
+            self.cost_budget_allowance,
+            self.cost_budget_window_start,
+            self.cost_budget_window_end,
+        )
+        if self.status is InvocationStatus.COST_LIMITED:
+            consumed = self.cost_budget_consumed
+            limit = self.cost_budget_limit
+            allowance = self.cost_budget_allowance
+            window_start = self.cost_budget_window_start
+            window_end = self.cost_budget_window_end
+            if (
+                consumed is None
+                or limit is None
+                or allowance is None
+                or window_start is None
+                or window_end is None
+            ):
+                raise ValueError("A cost-limited Invocation requires cost-budget evidence.")
+            if (
+                consumed < 0
+                or limit <= 0
+                or allowance <= 0
+                or allowance > limit
+                or consumed + allowance <= limit
+            ):
+                raise ValueError("Cost-limited Invocation budget evidence is inconsistent.")
+            for timestamp in (window_start, window_end):
+                if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                    raise ValueError("Cost-budget window must be timezone-aware.")
+            if window_end <= window_start:
+                raise ValueError("Cost-budget window end must follow its start.")
+            if self.usage is not None or self.provider_response_id is not None:
+                raise ValueError("A cost-limited Invocation cannot contain provider telemetry.")
+        elif any(value is not None for value in cost_budget_evidence):
+            raise ValueError("Cost-budget evidence belongs only to a cost-limited Invocation.")
         if self.estimated_cost is not None:
             if self.status is not InvocationStatus.SUCCEEDED:
                 raise ValueError("Estimated cost belongs only to a succeeded Invocation.")
@@ -268,6 +313,45 @@ class Invocation:
             allowance_units,
             window_start,
             window_end,
+        )
+
+    @classmethod
+    def cost_limited(
+        cls,
+        invocation_id: InvocationId,
+        tenant_id: TenantId,
+        agent_id: AgentId,
+        model_id: ModelId,
+        input_text: str,
+        started_at: datetime,
+        completed_at: datetime,
+        policy_decision_id: PolicyDecisionId,
+        runtime_principal_id: str,
+        *,
+        consumed: Decimal,
+        limit: Decimal,
+        allowance: Decimal,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> "Invocation":
+        return cls(
+            invocation_id,
+            tenant_id,
+            agent_id,
+            model_id,
+            InvocationStatus.COST_LIMITED,
+            input_text,
+            None,
+            started_at,
+            completed_at,
+            policy_decision_id,
+            runtime_principal_id,
+            _duration_ms(started_at, completed_at),
+            cost_budget_consumed=consumed,
+            cost_budget_limit=limit,
+            cost_budget_allowance=allowance,
+            cost_budget_window_start=window_start,
+            cost_budget_window_end=window_end,
         )
 
 

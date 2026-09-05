@@ -12,12 +12,15 @@ from valor.runtime_gateway.application.create_invocation import (
 )
 from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
+    InvocationCostLimited,
     InvocationDenied,
     InvocationNotFound,
     InvocationUsageLimited,
     ModelNotAvailable,
     ProviderInvocationFailed,
     ProviderNotSupportedForRuntime,
+    TenantCostBudgetCheckUnavailable,
+    TenantCostBudgetConfigurationUnavailable,
     TenantNotAvailable,
     UsageLimitUnavailable,
 )
@@ -33,6 +36,7 @@ from valor.runtime_gateway.application.ports import (
     RuntimePolicyDecision,
 )
 from valor.runtime_gateway.domain.cost import PricingSnapshot
+from valor.runtime_gateway.domain.cost_budget import TenantCostBudget
 from valor.runtime_gateway.domain.identity import (
     AgentId,
     InvocationId,
@@ -213,6 +217,40 @@ class PricingStub:
         return self.pricing
 
 
+class BudgetStub:
+    def __init__(self, budget: TenantCostBudget | None = None, *, missing: bool = False) -> None:
+        self.budget: TenantCostBudget | None = (
+            None if missing else budget or TenantCostBudget(Decimal("100"), Decimal("1"))
+        )
+        self.calls = 0
+
+    def resolve(self, tenant_id: TenantId) -> TenantCostBudget | None:
+        del tenant_id
+        self.calls += 1
+        return self.budget
+
+
+class CostReaderStub:
+    def __init__(
+        self, cost: Decimal = Decimal("0"), *, events: list[str] | None = None, fails: bool = False
+    ) -> None:
+        self.cost = cost
+        self.events = events
+        self.fails = fails
+        self.calls = 0
+
+    async def attributed_cost(
+        self, *, tenant_id: TenantId, window_start: datetime, window_end: datetime
+    ) -> Decimal:
+        del tenant_id, window_start, window_end
+        self.calls += 1
+        if self.events is not None:
+            self.events.append("cost")
+        if self.fails:
+            raise TenantCostBudgetCheckUnavailable
+        return self.cost
+
+
 def handler(
     unit_of_work: RecordingInvocationUnitOfWork,
     admission: AdmissionStub,
@@ -221,6 +259,8 @@ def handler(
     events: list[str] | None = None,
     usage_reader: UsageReaderStub | None = None,
     pricing: PricingStub | None = None,
+    budget: BudgetStub | None = None,
+    cost_reader: CostReaderStub | None = None,
 ) -> CreateInvocationHandler:
     times = iter((STARTED_AT, COMPLETED_AT))
 
@@ -239,6 +279,8 @@ def handler(
         policy or PolicyStub(),
         usage_reader or UsageReaderStub(events=events),
         pricing or PricingStub(),
+        budget or BudgetStub(),
+        cost_reader or CostReaderStub(events=events),
         id_factory=lambda: INVOCATION_UUID,
         clock=clock,
     )
@@ -311,6 +353,7 @@ async def test_all_final_outcomes_measure_from_application_processing_start(
     assert events[-1] == "clock:complete"
     assert ("provider" in events) is (outcome != "denied")
     assert ("usage" in events) is (outcome != "denied")
+    assert ("cost" in events) is (outcome != "denied")
     invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
     assert invocation.duration_ms == 1_000
 
@@ -393,8 +436,15 @@ async def test_over_limit_persists_limited_evidence_without_provider() -> None:
     unit_of_work = RecordingInvocationUnitOfWork()
     provider = ProviderStub()
     usage_reader = UsageReaderStub(901)
+    cost_reader = CostReaderStub()
     with pytest.raises(InvocationUsageLimited):
-        await handler(unit_of_work, AdmissionStub(), provider, usage_reader=usage_reader)(command())
+        await handler(
+            unit_of_work,
+            AdmissionStub(),
+            provider,
+            usage_reader=usage_reader,
+            cost_reader=cost_reader,
+        )(command())
     invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
     assert invocation.status is InvocationStatus.LIMITED
     assert invocation.usage_consumed_units == 901
@@ -402,6 +452,7 @@ async def test_over_limit_persists_limited_evidence_without_provider() -> None:
     assert invocation.usage_allowance_units == 100
     assert invocation.usage is None and invocation.provider_response_id is None
     assert provider.calls == []
+    assert cost_reader.calls == 0
 
 
 @pytest.mark.asyncio
@@ -417,6 +468,54 @@ async def test_usage_reader_failure_fails_closed_before_provider() -> None:
         )(command())
     assert provider.calls == []
     assert unit_of_work.entered == 0
+
+
+@pytest.mark.asyncio
+async def test_missing_budget_configuration_fails_closed_before_provider() -> None:
+    unit_of_work = RecordingInvocationUnitOfWork()
+    provider = ProviderStub()
+    missing = BudgetStub(missing=True)
+    with pytest.raises(TenantCostBudgetConfigurationUnavailable):
+        await handler(unit_of_work, AdmissionStub(), provider, budget=missing)(command())
+    assert provider.calls == []
+    assert unit_of_work.entered == 0
+
+
+@pytest.mark.asyncio
+async def test_cost_reader_failure_fails_closed_before_provider() -> None:
+    unit_of_work = RecordingInvocationUnitOfWork()
+    provider = ProviderStub()
+    with pytest.raises(TenantCostBudgetCheckUnavailable):
+        await handler(
+            unit_of_work,
+            AdmissionStub(),
+            provider,
+            cost_reader=CostReaderStub(fails=True),
+        )(command())
+    assert provider.calls == []
+    assert unit_of_work.entered == 0
+
+
+@pytest.mark.asyncio
+async def test_over_budget_persists_cost_limited_evidence_without_provider() -> None:
+    unit_of_work = RecordingInvocationUnitOfWork()
+    provider = ProviderStub()
+    with pytest.raises(InvocationCostLimited):
+        await handler(
+            unit_of_work,
+            AdmissionStub(),
+            provider,
+            budget=BudgetStub(TenantCostBudget(Decimal("10"), Decimal("1"))),
+            cost_reader=CostReaderStub(Decimal("9.000000000001")),
+        )(command())
+    invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
+    assert invocation.status is InvocationStatus.COST_LIMITED
+    assert invocation.cost_budget_consumed == Decimal("9.000000000001")
+    assert invocation.cost_budget_limit == Decimal("10")
+    assert invocation.cost_budget_allowance == Decimal("1")
+    assert invocation.usage is None
+    assert invocation.estimated_cost is None
+    assert provider.calls == []
 
 
 @pytest.mark.asyncio
@@ -463,10 +562,16 @@ async def test_policy_deny_records_denied_invocation_without_provider(effect: st
     provider = ProviderStub()
     policy = PolicyStub(effect)
     usage_reader = UsageReaderStub()
+    cost_reader = CostReaderStub()
     with pytest.raises(InvocationDenied) as error:
-        await handler(unit_of_work, AdmissionStub(), provider, policy, usage_reader=usage_reader)(
-            command()
-        )
+        await handler(
+            unit_of_work,
+            AdmissionStub(),
+            provider,
+            policy,
+            usage_reader=usage_reader,
+            cost_reader=cost_reader,
+        )(command())
     invocation = unit_of_work.invocations.items[InvocationId(INVOCATION_UUID)]
     assert invocation.status is InvocationStatus.DENIED
     assert invocation.policy_decision_id == DECISION_ID
@@ -476,6 +581,7 @@ async def test_policy_deny_records_denied_invocation_without_provider(effect: st
     assert error.value.decision_id == DECISION_ID
     assert provider.calls == []
     assert usage_reader.calls == 0
+    assert cost_reader.calls == 0
     assert unit_of_work.commits == 1
 
 

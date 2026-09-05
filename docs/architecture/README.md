@@ -177,6 +177,23 @@ only ten are exposed. No asset lookup or N+1 query is performed. The response om
 outputs, Invocation IDs, names, and provider metadata. Configurable rankings, reporting tables,
 repricing, billing, dashboards, exports, and an analytics store are intentionally absent.
 
+### Tenant estimated-cost budget enforcement
+
+Provider-eligible Runtime requests follow the explicit order: policy, Runtime Principal usage
+limit, Tenant cost budget, then provider execution. Static configuration resolves an exact Tenant
+UUID to a positive USD daily budget and positive per-request allowance. The same UTC calendar-day
+window and `[start, end)` semantics used by usage enforcement apply.
+
+A narrow PostgreSQL reader sums only persisted `cost_total` snapshots and closes its read session
+before provider I/O. If known cost plus allowance exceeds the budget, the provider is not called
+and a `cost_limited` Invocation records the exact consumed, limit, allowance, and window values.
+Missing configuration and ledger failures fail closed with sanitized 503 responses.
+
+The control is sequential and estimate-based. Unknown historical costs are excluded, actual request
+cost can exceed the allowance, and concurrent requests can collectively overshoot. No transaction
+is held across provider execution, and there is no reservation ledger, billing system, budget CRUD,
+monthly window, alerting, or provider invoice reconciliation.
+
 ### Default-deny Agent-to-Model admission
 
 Policy & Risk owns one `AgentModelPermission` per Tenant/Agent/Model tuple. PUT atomically creates or replaces the current `ALLOW`/`DENY` effect while preserving PermissionId and creation time. There are no conditions, wildcards, inheritance, rule precedence, versions, assignments, RBAC/ABAC, or external policy engine.

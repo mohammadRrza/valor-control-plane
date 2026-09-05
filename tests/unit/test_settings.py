@@ -12,6 +12,8 @@ from valor.bootstrap.settings import (
     RuntimePrincipalSettings,
     SecuritySettings,
     Settings,
+    TenantBudgetEntrySettings,
+    TenantBudgetSettings,
 )
 
 
@@ -58,6 +60,51 @@ def test_duplicate_provider_pricing_fails_fast(duplicate: str) -> None:
     )
     with pytest.raises(ValidationError):
         PricingSettings(entries=(first, second))
+
+
+def tenant_budget(**overrides: object) -> TenantBudgetEntrySettings:
+    values: dict[str, object] = {
+        "tenant_id": "11111111-1111-4111-8111-111111111111",
+        "daily_estimated_cost_budget": "10.000000000000",
+        "per_invocation_cost_allowance": "1.000000000000",
+        "currency": "USD",
+    }
+    return TenantBudgetEntrySettings.model_validate(values | overrides)
+
+
+def test_valid_tenant_budget_uses_decimal() -> None:
+    entry = tenant_budget()
+    assert entry.daily_estimated_cost_budget == Decimal("10.000000000000")
+    assert entry.per_invocation_cost_allowance == Decimal("1.000000000000")
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"daily_estimated_cost_budget": "0"},
+        {"daily_estimated_cost_budget": "-1"},
+        {"per_invocation_cost_allowance": "0"},
+        {"per_invocation_cost_allowance": "-1"},
+        {"per_invocation_cost_allowance": "11"},
+        {"daily_estimated_cost_budget": "not-decimal"},
+        {"currency": "EUR"},
+    ],
+)
+def test_invalid_tenant_budget_fails_fast(overrides: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        tenant_budget(**overrides)
+
+
+def test_missing_tenant_budget_values_fail_fast() -> None:
+    with pytest.raises(ValidationError):
+        TenantBudgetEntrySettings.model_validate(
+            {"tenant_id": "11111111-1111-4111-8111-111111111111"}
+        )
+
+
+def test_duplicate_tenant_budget_configuration_fails_fast() -> None:
+    with pytest.raises(ValidationError):
+        TenantBudgetSettings(entries=(tenant_budget(), tenant_budget()))
 
 
 def test_database_url_is_required(monkeypatch: pytest.MonkeyPatch) -> None:

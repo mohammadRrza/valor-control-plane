@@ -7,11 +7,13 @@ from uuid import UUID, uuid4
 
 from valor.runtime_gateway.application.errors import (
     AgentNotAvailable,
+    InvocationCostLimited,
     InvocationDenied,
     InvocationUsageLimited,
     ModelNotAvailable,
     ProviderInvocationFailed,
     ProviderNotSupportedForRuntime,
+    TenantCostBudgetConfigurationUnavailable,
     TenantNotAvailable,
 )
 from valor.runtime_gateway.application.ports import (
@@ -22,10 +24,13 @@ from valor.runtime_gateway.application.ports import (
     ProviderTransportError,
     RuntimePolicyDecisionPort,
     RuntimeUsageReaderPort,
+    TenantCostBudgetPort,
+    TenantEstimatedCostReaderPort,
     TenantRuntimeLookupPort,
 )
 from valor.runtime_gateway.application.unit_of_work import InvocationUnitOfWork
 from valor.runtime_gateway.domain.cost import attribute_cost
+from valor.runtime_gateway.domain.cost_budget import decide_tenant_cost_budget
 from valor.runtime_gateway.domain.identity import AgentId, InvocationId, ModelId, TenantId
 from valor.runtime_gateway.domain.invocation import Invocation, validated_input
 from valor.runtime_gateway.domain.usage_limit import decide_usage_limit, utc_day_window
@@ -57,6 +62,8 @@ class CreateInvocationHandler:
         policy: RuntimePolicyDecisionPort,
         usage_reader: RuntimeUsageReaderPort,
         pricing: InvocationPricingPort,
+        tenant_budgets: TenantCostBudgetPort,
+        tenant_cost_reader: TenantEstimatedCostReaderPort,
         *,
         id_factory: Callable[[], UUID] = uuid4,
         clock: Callable[[], datetime] = utc_now,
@@ -69,6 +76,8 @@ class CreateInvocationHandler:
         self._policy = policy
         self._usage_reader = usage_reader
         self._pricing = pricing
+        self._tenant_budgets = tenant_budgets
+        self._tenant_cost_reader = tenant_cost_reader
         self._id_factory = id_factory
         self._clock = clock
 
@@ -138,6 +147,38 @@ class CreateInvocationHandler:
             )
             await self._persist(limited)
             raise InvocationUsageLimited(invocation_id, window.end)
+        budget = self._tenant_budgets.resolve(command.tenant_id)
+        if budget is None:
+            raise TenantCostBudgetConfigurationUnavailable
+        attributed_cost = await self._tenant_cost_reader.attributed_cost(
+            tenant_id=command.tenant_id,
+            window_start=window.start,
+            window_end=window.end,
+        )
+        budget_decision = decide_tenant_cost_budget(
+            attributed_cost=attributed_cost,
+            budget=budget,
+            window=window,
+        )
+        if not budget_decision.allowed:
+            cost_limited = Invocation.cost_limited(
+                invocation_id,
+                command.tenant_id,
+                command.agent_id,
+                command.model_id,
+                input_text,
+                started_at,
+                self._clock(),
+                decision.id,
+                command.runtime_principal_id,
+                consumed=budget_decision.attributed_cost,
+                limit=budget_decision.budget,
+                allowance=budget_decision.allowance,
+                window_start=window.start,
+                window_end=window.end,
+            )
+            await self._persist(cost_limited)
+            raise InvocationCostLimited(invocation_id, window.end)
         try:
             result = await self._openai_provider.invoke(
                 model_reference=model.provider_model_reference,

@@ -2,10 +2,12 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
 from valor.runtime_gateway.domain.cost import PricingSnapshot
+from valor.runtime_gateway.domain.cost_budget import TenantCostBudget
 from valor.runtime_gateway.domain.identity import (
     AgentId,
     InvocationId,
@@ -87,6 +89,16 @@ class InvocationPricingPort(Protocol):
     def resolve(
         self, *, provider: str, provider_model_reference: str
     ) -> PricingSnapshot | None: ...
+
+
+class TenantCostBudgetPort(Protocol):
+    def resolve(self, tenant_id: TenantId) -> TenantCostBudget | None: ...
+
+
+class TenantEstimatedCostReaderPort(Protocol):
+    async def attributed_cost(
+        self, *, tenant_id: TenantId, window_start: datetime, window_end: datetime
+    ) -> Decimal: ...
 
 
 class ProviderTransportError(Exception):

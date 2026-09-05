@@ -18,3 +18,4 @@ ADRs record decisions at the time they are made. Supersede rather than silently 
 - [ADR-0014](0014-utc-daily-runtime-principal-usage-limit.md) — UTC daily Runtime Principal usage pre-check
 - [ADR-0015](0015-snapshot-configured-pricing-for-invocation-cost.md) — immutable configured pricing and estimated cost snapshot
 - [ADR-0016](0016-aggregate-tenant-runtime-reporting.md) — bounded Tenant Runtime aggregation from Invocation evidence
+- [ADR-0017](0017-enforce-tenant-daily-estimated-cost-budget.md) — fail-closed Tenant daily estimated-cost governance

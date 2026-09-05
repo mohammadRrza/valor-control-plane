@@ -57,6 +57,7 @@ class PostgresTenantRuntimeReportReader:
             func.count().filter(InvocationRow.status == "failed"),
             func.count().filter(InvocationRow.status == "denied"),
             func.count().filter(InvocationRow.status == "limited"),
+            func.count().filter(InvocationRow.status == "cost_limited"),
             func.coalesce(func.sum(case((usage_known, InvocationRow.input_units), else_=0)), 0),
             func.coalesce(func.sum(case((usage_known, InvocationRow.output_units), else_=0)), 0),
             func.coalesce(func.sum(case((usage_known, InvocationRow.total_units), else_=0)), 0),
@@ -84,9 +85,9 @@ class PostgresTenantRuntimeReportReader:
             tenant_id,
             start,
             end,
-            InvocationCounts(*map(int, row[0:5])),
-            UsageTotals(*map(int, row[5:11])),
-            EstimatedCostTotals("USD", Decimal(row[11]), int(row[12]), int(row[13])),
+            InvocationCounts(*map(int, row[0:6])),
+            UsageTotals(*map(int, row[6:12])),
+            EstimatedCostTotals("USD", Decimal(row[12]), int(row[13]), int(row[14])),
             tuple(
                 AgentCostBreakdown(
                     item[0],

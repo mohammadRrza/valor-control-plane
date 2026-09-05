@@ -38,7 +38,7 @@ class ReportReaderStub:
             tenant_id,
             start,
             end,
-            InvocationCounts(0, 0, 0, 0, 0),
+            InvocationCounts(0, 0, 0, 0, 0, 0),
             UsageTotals(0, 0, 0, 0, 0, 0),
             EstimatedCostTotals("USD", Decimal("0.000000000000"), 0, 0),
         )

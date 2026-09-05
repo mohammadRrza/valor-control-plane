@@ -27,6 +27,10 @@ from valor.policy_risk.presentation.errors import install_policy_error_handlers
 from valor.policy_risk.presentation.routes import router as policy_router
 from valor.runtime_gateway.application.ports import ModelProviderPort
 from valor.runtime_gateway.infrastructure.admission import PostgresRuntimeAdmission
+from valor.runtime_gateway.infrastructure.cost_budget import (
+    ConfiguredTenantCostBudgets,
+    PostgresTenantEstimatedCostReader,
+)
 from valor.runtime_gateway.infrastructure.openai_provider import OpenAIResponsesProvider
 from valor.runtime_gateway.infrastructure.pricing import ConfiguredInvocationPricing
 from valor.runtime_gateway.infrastructure.reporting import PostgresTenantRuntimeReportReader
@@ -64,6 +68,8 @@ def create_app(
         app.state.runtime_usage_reader = PostgresRuntimeUsageReader(database.sessions)
         app.state.runtime_report_reader = PostgresTenantRuntimeReportReader(database.sessions)
         app.state.invocation_pricing = ConfiguredInvocationPricing(resolved.pricing)
+        app.state.tenant_cost_budgets = ConfiguredTenantCostBudgets(resolved.tenant_budgets)
+        app.state.tenant_cost_reader = PostgresTenantEstimatedCostReader(database.sessions)
         app.state.policy_uow_factory = partial(SqlAlchemyPolicyUnitOfWork, database.sessions)
         app.state.policy_admission = PostgresPolicyAdmission(database.sessions)
         app.state.runtime_policy = RuntimePolicyAdapter(app.state.policy_uow_factory)

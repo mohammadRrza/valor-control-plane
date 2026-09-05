@@ -61,3 +61,17 @@ class InvocationUsageLimited(Exception):
 
 class UsageLimitUnavailable(Exception):
     """The usage ledger could not be read safely."""
+
+
+class TenantCostBudgetConfigurationUnavailable(Exception):
+    """No explicit Tenant monetary governance configuration is available."""
+
+
+class TenantCostBudgetCheckUnavailable(Exception):
+    """The persisted Tenant cost ledger could not be read safely."""
+
+
+class InvocationCostLimited(Exception):
+    def __init__(self, invocation_id: InvocationId, window_end: datetime) -> None:
+        self.invocation_id = invocation_id
+        self.window_end = window_end

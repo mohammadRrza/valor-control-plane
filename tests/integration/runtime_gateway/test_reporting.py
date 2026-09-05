@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, async_sessionmaker, create_async_engine
 
 from valor.runtime_gateway.domain.identity import TenantId
+from valor.runtime_gateway.infrastructure.cost_budget import PostgresTenantEstimatedCostReader
 from valor.runtime_gateway.infrastructure.reporting import PostgresTenantRuntimeReportReader
 
 TENANT_A = UUID("11111111-1111-4111-8111-111111111111")
@@ -113,6 +114,7 @@ def invocation_values(
 ) -> dict[str, object]:
     suffix = 1 if tenant_id == TENANT_A else 2
     limited = status == "limited"
+    cost_limited = status == "cost_limited"
     return {
         "id": uuid4(),
         "tenant_id": tenant_id,
@@ -138,6 +140,11 @@ def invocation_values(
         "basis": 1_000_000 if cost is not None else None,
         "input_rate": Decimal("1") if cost is not None else None,
         "output_rate": Decimal("1") if cost is not None else None,
+        "budget_consumed": Decimal("9.5") if cost_limited else None,
+        "budget_limit": Decimal("10") if cost_limited else None,
+        "budget_allowance": Decimal("1") if cost_limited else None,
+        "budget_window_start": START if cost_limited else None,
+        "budget_window_end": END if cost_limited else None,
     }
 
 
@@ -147,11 +154,14 @@ INSERT_INVOCATION = text(
     "output_units, total_units, usage_consumed_units, usage_limit_units, "
     "usage_allowance_units, usage_window_start, usage_window_end, cost_currency, cost_input, "
     "cost_output, cost_total, pricing_version, pricing_basis_units, pricing_input_rate, "
-    "pricing_output_rate) VALUES (:id, :tenant_id, :agent_id, :model_id, :status, 'input', "
+    "pricing_output_rate, cost_budget_consumed, cost_budget_limit, cost_budget_allowance, "
+    "cost_budget_window_start, cost_budget_window_end) VALUES "
+    "(:id, :tenant_id, :agent_id, :model_id, :status, 'input', "
     ":output_text, :started_at, :completed_at, 'runtime-test', 1000, :input_units, "
     ":output_units, :total_units, :consumed, :limit, :allowance, :window_start, :window_end, "
     ":currency, :cost_input, :cost_output, :cost_total, :pricing_version, :basis, "
-    ":input_rate, :output_rate)"
+    ":input_rate, :output_rate, :budget_consumed, :budget_limit, :budget_allowance, "
+    ":budget_window_start, :budget_window_end)"
 )
 
 
@@ -184,6 +194,7 @@ async def test_postgres_report_aggregates_exact_tenant_half_open_evidence(
             invocation_values("failed", START + timedelta(hours=4)),
             invocation_values("denied", START + timedelta(hours=5)),
             invocation_values("limited", START + timedelta(hours=6)),
+            invocation_values("cost_limited", START + timedelta(hours=7)),
             invocation_values("succeeded", END, usage=(999, 999, 1998)),
             invocation_values("succeeded", START, tenant_id=TENANT_B, usage=(999, 999, 1998)),
         ]
@@ -193,11 +204,12 @@ async def test_postgres_report_aggregates_exact_tenant_half_open_evidence(
     reader = PostgresTenantRuntimeReportReader(async_sessionmaker(engine))
     report = await reader.get_report(tenant_id=TenantId(TENANT_A), start=START, end=END)
 
-    assert report.invocations.total == 7
+    assert report.invocations.total == 8
     assert report.invocations.succeeded == 3
     assert report.invocations.failed == 2
     assert report.invocations.denied == 1
     assert report.invocations.limited == 1
+    assert report.invocations.cost_limited == 1
     assert report.usage.input_units == 120
     assert report.usage.output_units == 50
     assert report.usage.total_units == 170
@@ -207,6 +219,9 @@ async def test_postgres_report_aggregates_exact_tenant_half_open_evidence(
     assert report.estimated_cost.total == Decimal("3.000000000003")
     assert report.estimated_cost.attributed_invocations == 2
     assert report.estimated_cost.unavailable_invocations == 1
+    assert report.top_agents_by_estimated_cost[0].invocation_count == 8
+    assert report.top_agents_by_estimated_cost[0].cost_unavailable_invocations == 1
+    assert report.top_models_by_estimated_cost[0].invocation_count == 8
 
     cast(FastAPI, runtime_client.app).state.settings.security.management_tenant_ids = frozenset(
         {TENANT_A}
@@ -218,11 +233,12 @@ async def test_postgres_report_aggregates_exact_tenant_half_open_evidence(
     assert response.status_code == 200
     payload = response.json()
     assert payload["invocations"] == {
-        "total": 7,
+        "total": 8,
         "succeeded": 3,
         "failed": 2,
         "denied": 1,
         "limited": 1,
+        "cost_limited": 1,
     }
     assert payload["usage"] == {
         "input_units": 120,
@@ -368,4 +384,48 @@ async def test_postgres_report_returns_deterministic_bounded_cost_breakdowns(
     }
     assert "input_text" not in response.text
     assert "output_text" not in response.text
+    await engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_tenant_cost_reader_sums_exact_snapshots_with_tenant_utc_day_isolation(
+    runtime_database_url: str,
+) -> None:
+    engine = create_async_engine(runtime_database_url)
+    async with engine.begin() as connection:
+        await seed_references(connection)
+        rows = [
+            invocation_values(
+                "succeeded",
+                START,
+                cost=Decimal("1.000000000001"),
+                pricing_version="historical-a",
+                usage=(1, 1, 2),
+            ),
+            invocation_values("succeeded", START + timedelta(hours=1)),
+            invocation_values(
+                "succeeded",
+                END,
+                cost=Decimal("999.000000000000"),
+                pricing_version="next-day",
+                usage=(1, 1, 2),
+            ),
+            invocation_values(
+                "succeeded",
+                START,
+                tenant_id=TENANT_B,
+                cost=Decimal("1000.000000000000"),
+                pricing_version="other-tenant",
+                usage=(1, 1, 2),
+            ),
+        ]
+        for row in rows:
+            await connection.execute(INSERT_INVOCATION, row)
+    reader = PostgresTenantEstimatedCostReader(async_sessionmaker(engine))
+    cost = await reader.attributed_cost(
+        tenant_id=TenantId(TENANT_A), window_start=START, window_end=END
+    )
+    assert cost == Decimal("1.000000000001")
+    assert isinstance(cost, Decimal)
     await engine.dispose()

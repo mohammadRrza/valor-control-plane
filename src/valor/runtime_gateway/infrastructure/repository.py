@@ -64,6 +64,11 @@ class SqlAlchemyInvocationRepository:
                 pricing_basis_units=cost.pricing_basis_units if cost else None,
                 pricing_input_rate=cost.pricing_input_rate if cost else None,
                 pricing_output_rate=cost.pricing_output_rate if cost else None,
+                cost_budget_consumed=invocation.cost_budget_consumed,
+                cost_budget_limit=invocation.cost_budget_limit,
+                cost_budget_allowance=invocation.cost_budget_allowance,
+                cost_budget_window_start=invocation.cost_budget_window_start,
+                cost_budget_window_end=invocation.cost_budget_window_end,
             )
         )
         try:
@@ -108,6 +113,11 @@ class SqlAlchemyInvocationRepository:
             row.usage_window_start,
             row.usage_window_end,
             _cost_from_row(row),
+            row.cost_budget_consumed,
+            row.cost_budget_limit,
+            row.cost_budget_allowance,
+            row.cost_budget_window_start,
+            row.cost_budget_window_end,
         )
 
 

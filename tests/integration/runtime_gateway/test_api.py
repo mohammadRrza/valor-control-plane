@@ -17,9 +17,12 @@ from valor.bootstrap.settings import (
     PricingSettings,
     RuntimeAuthenticationSettings,
     RuntimePrincipalSettings,
+    TenantBudgetEntrySettings,
+    TenantBudgetSettings,
 )
 from valor.runtime_gateway.application.errors import UsageLimitUnavailable
 from valor.runtime_gateway.application.reporting import RuntimeReportUnavailable
+from valor.runtime_gateway.infrastructure.cost_budget import ConfiguredTenantCostBudgets
 from valor.runtime_gateway.infrastructure.pricing import ConfiguredInvocationPricing
 
 
@@ -102,7 +105,31 @@ def create_tenant(client: TestClient, name: str) -> UUID:
     tenant_id = UUID(response.json()["id"])
     security = cast(FastAPI, client.app).state.settings.security
     security.management_tenant_ids = security.management_tenant_ids | {tenant_id}
+    configure_tenant_budget(client, tenant_id)
     return tenant_id
+
+
+def configure_tenant_budget(
+    client: TestClient,
+    tenant_id: UUID,
+    *,
+    budget: str = "1000.000000000000",
+    allowance: str = "1.000000000000",
+) -> None:
+    app = cast(FastAPI, client.app)
+    current = app.state.settings.tenant_budgets.entries
+    budget_settings = TenantBudgetSettings(
+        entries=(
+            *(entry for entry in current if entry.tenant_id != tenant_id),
+            TenantBudgetEntrySettings(
+                tenant_id=tenant_id,
+                daily_estimated_cost_budget=budget,
+                per_invocation_cost_allowance=allowance,
+            ),
+        )
+    )
+    app.state.settings.tenant_budgets = budget_settings
+    app.state.tenant_cost_budgets = ConfiguredTenantCostBudgets(budget_settings)
 
 
 def create_agent(client: TestClient, tenant_id: UUID, name: str) -> UUID:
@@ -172,6 +199,87 @@ def assert_problem(response_status: int, content_type: str, body: dict[str, obje
 
 
 @pytest.mark.integration
+def test_tenant_cost_budget_blocks_provider_and_persists_retrievable_evidence(
+    runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
+    configure_pricing(runtime_client, version="budget-test", input_rate="2", output_rate="8")
+    configure_tenant_budget(
+        runtime_client,
+        tenant_id,
+        budget="0.000150000000",
+        allowance="0.000050000000",
+    )
+
+    first = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+    assert first.status_code == 201
+    assert first.json()["estimated_cost"]["total"] == "0.000106000000"
+
+    second = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+    assert second.status_code == 429
+    assert second.json()["title"] == "Tenant Estimated-Cost Budget Reached"
+    assert len(runtime_provider.calls) == 1
+
+    invocation_id = second.json()["invocation_id"]
+    evidence = runtime_client.get(
+        f"/api/v1/runtime/invocations/{invocation_id}", headers=runtime_headers(agent_id)
+    )
+    assert evidence.status_code == 200
+    assert evidence.json()["status"] == "cost_limited"
+    assert evidence.json()["cost_budget_consumed"] == "0.000106000000"
+    assert evidence.json()["cost_budget_limit"] == "0.000150000000"
+    assert evidence.json()["cost_budget_allowance"] == "0.000050000000"
+    assert evidence.json()["usage"] is None
+    assert evidence.json()["estimated_cost"] is None
+
+    started = datetime.fromisoformat(first.json()["started_at"])
+    day_start = started.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    report = runtime_client.get(
+        f"/api/v1/tenants/{tenant_id}/runtime-report",
+        params={
+            "start": day_start.isoformat(),
+            "end": (day_start + timedelta(days=1)).isoformat(),
+        },
+    )
+    assert report.status_code == 200
+    assert report.json()["invocations"]["cost_limited"] == 1
+    agent_row = report.json()["top_agents_by_estimated_cost"][0]
+    assert agent_row["invocation_count"] == 2
+    assert agent_row["cost_attributed_invocations"] == 1
+    assert agent_row["cost_unavailable_invocations"] == 0
+
+
+@pytest.mark.integration
+def test_missing_tenant_budget_fails_closed_with_sanitized_503(
+    runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
+    app = cast(FastAPI, runtime_client.app)
+    app.state.tenant_cost_budgets = ConfiguredTenantCostBudgets(TenantBudgetSettings(entries=()))
+
+    response = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+    assert response.status_code == 503
+    assert response.json()["title"] == "Tenant Cost Budget Check Unavailable"
+    assert runtime_provider.calls == []
+
+
+@pytest.mark.integration
 def test_tenant_runtime_report_is_management_scoped_and_empty_is_explicit(
     runtime_client: TestClient,
 ) -> None:
@@ -195,6 +303,7 @@ def test_tenant_runtime_report_is_management_scoped_and_empty_is_explicit(
             "failed": 0,
             "denied": 0,
             "limited": 0,
+            "cost_limited": 0,
         },
         "usage": {
             "input_units": 0,
@@ -398,6 +507,8 @@ async def test_tenant_scoped_management_authorization_is_non_disclosing_and_fail
     assert tenant_a_response.status_code == tenant_b_response.status_code == 201
     tenant_a = UUID(tenant_a_response.json()["id"])
     tenant_b = UUID(tenant_b_response.json()["id"])
+    configure_tenant_budget(runtime_client, tenant_a)
+    configure_tenant_budget(runtime_client, tenant_b)
 
     security = cast(FastAPI, runtime_client.app).state.settings.security
     security.management_tenant_ids = frozenset({tenant_a, tenant_b})
@@ -589,6 +700,7 @@ def test_anonymous_policy_mutation_cannot_bypass_default_deny(
     )
     assert tenant_response.status_code == 201
     tenant_id = UUID(tenant_response.json()["id"])
+    configure_tenant_budget(unauthenticated_runtime_client, tenant_id)
     security = cast(FastAPI, unauthenticated_runtime_client.app).state.settings.security
     security.management_tenant_ids = frozenset({tenant_id})
     agent_response = unauthenticated_runtime_client.post(
