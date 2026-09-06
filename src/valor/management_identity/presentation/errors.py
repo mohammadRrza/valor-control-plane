@@ -11,6 +11,7 @@ from valor.management_identity.application.errors import (
     ManagementPrincipalNotFound,
     PrincipalManagementDenied,
 )
+from valor.management_identity.application.evidence_query import InvalidAuthenticationEvidenceQuery
 
 
 def install_management_identity_error_handlers(app: FastAPI) -> None:
@@ -70,6 +71,17 @@ def install_management_identity_error_handlers(app: FastAPI) -> None:
         return problem_response(
             request,
             title="Invalid Management Identity Command",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+
+    @app.exception_handler(InvalidAuthenticationEvidenceQuery)
+    async def invalid_evidence_query(
+        request: Request, exc: InvalidAuthenticationEvidenceQuery
+    ) -> JSONResponse:
+        return problem_response(
+            request,
+            title="Invalid Management Authentication Evidence Query",
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         )

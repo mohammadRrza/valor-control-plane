@@ -59,6 +59,16 @@ class ManagementAuthenticationEvidenceRow(SqlAlchemyBase):
             name="ck_management_authentication_evidence_outcome",
         ),
         Index("ix_management_auth_evidence_bucket", "bucket_started_at"),
+        Index(
+            "ix_management_auth_evidence_credential_observed",
+            "credential_id",
+            "first_observed_at",
+        ),
+        Index(
+            "ix_management_auth_evidence_principal_observed",
+            "principal_id",
+            "first_observed_at",
+        ),
     )
 
     credential_id: Mapped[UUID] = mapped_column(

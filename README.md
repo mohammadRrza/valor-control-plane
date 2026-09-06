@@ -159,8 +159,15 @@ credential mismatch. Malformed and unknown bearer garbage is not persisted. Rows
 credential/Principal UUIDs, outcome, bucket, and first-observed time, and buckets older than 90
 days are removed opportunistically. Exact attempt counts are deliberately unavailable so hostile
 repetition cannot create proportional durable writes. Every external authentication failure remains
-the same generic 401. Migration 0016 adds this evidence table; no read API, alerting, SIEM, IP/user
-agent collection, or Runtime authentication change is included.
+the same generic 401. Migration 0016 adds this evidence table; no alerting, SIEM, IP/user-agent
+collection, or Runtime authentication change is included.
+
+Principal managers can read this metadata through
+`GET /api/v1/management/authentication-evidence`. A request must supply exactly one of
+`credential_id` or `principal_id`, a timezone-aware range of at most 31 days, and an optional limit
+from 1 to 100. The default is 50. Non-managers receive a non-disclosing 404 and unknown identities
+return an empty list. The endpoint has no unfiltered mode, pagination, aggregation, export,
+dashboard, alerting, or SIEM integration.
 
 Runtime authentication does not replace authorization: an explicit ALLOW for the authenticated Tenant/Agent and requested Model remains required. Static runtime configuration has no issuance, rotation, revocation, expiry, rate limits, or workload federation, so this remains an interim boundary requiring TLS and secure secret injection.
 

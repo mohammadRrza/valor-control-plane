@@ -85,6 +85,13 @@ or malformed external values do not become database records. This evidence is de
 `management_audit` mutation record or a generic event platform; Runtime authentication is outside
 its boundary.
 
+Phase 4.3 adds a separate read adapter and application query contract within
+`management_identity`. Principal managers must filter by exactly one credential or Principal and a
+maximum 31-day range; responses are capped at 100 metadata rows. Composite identity/time indexes
+support both access paths. Presentation performs capability enforcement, application owns query
+validation, and infrastructure owns SQL. No Management Audit internals or Runtime identity code is
+used.
+
 These are domain boundaries, not services. Identity & Tenancy supports Tenant creation/retrieval; AI Asset Registry supports Agent and Model registration/retrieval; Runtime Gateway supports one synchronous OpenAI Invocation; Policy & Risk supports one exact Agent-to-Model permission and decision history. Each context owns its architectural layers. Cross-context access uses explicit contracts rather than imports into another context's internals.
 
 ### Tenant slice decisions

@@ -4,6 +4,9 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from valor.management_identity.application.handlers import IssuedCredential
+from valor.management_identity.domain.authentication_evidence import (
+    ManagementAuthenticationEvidence,
+)
 from valor.management_identity.domain.models import ManagementCredential, ManagementPrincipal
 
 
@@ -72,3 +75,23 @@ class IssuedCredentialResponse(CredentialMetadataResponse):
 class BootstrapResponse(BaseModel):
     principal: PrincipalResponse
     credential: IssuedCredentialResponse
+
+
+class ManagementAuthenticationEvidenceResponse(BaseModel):
+    credential_id: UUID
+    principal_id: UUID
+    outcome: str
+    bucket_started_at: datetime
+    first_observed_at: datetime
+
+    @classmethod
+    def from_domain(
+        cls, value: ManagementAuthenticationEvidence
+    ) -> "ManagementAuthenticationEvidenceResponse":
+        return cls(
+            credential_id=value.credential_id,
+            principal_id=value.principal_id,
+            outcome=value.outcome.value,
+            bucket_started_at=value.bucket_started_at,
+            first_observed_at=value.first_observed_at,
+        )

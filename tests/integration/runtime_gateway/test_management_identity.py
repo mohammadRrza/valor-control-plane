@@ -317,6 +317,72 @@ def test_authentication_evidence_is_secret_free_attributable_and_hourly_bounded(
         ("succeeded", 1, 1),
     ]
 
+    now = datetime.now(UTC)
+    params = {
+        "credential_id": str(credential_id),
+        "start": (now - timedelta(days=1)).isoformat(),
+        "end": (now + timedelta(days=1)).isoformat(),
+    }
+    response = runtime_client.get("/api/v1/management/authentication-evidence", params=params)
+    assert response.status_code == 200
+    assert {row["outcome"] for row in response.json()} == {
+        "succeeded",
+        "credential_mismatch",
+    }
+    assert all(
+        set(row)
+        == {
+            "credential_id",
+            "principal_id",
+            "outcome",
+            "bucket_started_at",
+            "first_observed_at",
+        }
+        for row in response.json()
+    )
+    assert len(
+        runtime_client.get(
+            "/api/v1/management/authentication-evidence",
+            params={**params, "limit": 1},
+        ).json()
+    ) == 1
+
+    principal_query = dict(params)
+    principal_query.pop("credential_id")
+    principal_query["principal_id"] = str(principal_id)
+    assert (
+        len(
+            runtime_client.get(
+                "/api/v1/management/authentication-evidence", params=principal_query
+            ).json()
+        )
+        == 2
+    )
+
+    both = {**params, "principal_id": str(principal_id)}
+    assert (
+        runtime_client.get("/api/v1/management/authentication-evidence", params=both).status_code
+        == 422
+    )
+    assert (
+        runtime_client.get(
+            "/api/v1/management/authentication-evidence",
+            params={
+                "credential_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "start": params["start"],
+                "end": params["end"],
+            },
+        ).json()
+        == []
+    )
+
+    non_manager = runtime_client.get(
+        "/api/v1/management/authentication-evidence",
+        headers=valid_headers,
+        params=params,
+    )
+    assert non_manager.status_code == 404
+
 
 class _FailingAudit:
     async def append(self, record: object) -> None:

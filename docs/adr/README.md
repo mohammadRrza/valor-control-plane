@@ -22,3 +22,4 @@ ADRs record decisions at the time they are made. Supersede rather than silently 
 - [ADR-0018](0018-atomic-management-governance-audit.md) — atomic fingerprint-only Management governance audit
 - [ADR-0019](0019-persist-management-principals-and-credentials.md) — persisted Management principals and independent bearer credential rotation
 - [ADR-0020](0020-bound-management-credential-use-evidence.md) — bounded Management credential-use authentication evidence
+- [ADR-0021](0021-bound-management-authentication-evidence-query.md) — bounded Principal-manager authentication evidence query

@@ -1,10 +1,19 @@
+from datetime import datetime
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 
-from valor.management_identity.application.errors import BootstrapAuthenticationFailed
+from valor.management_identity.application.errors import (
+    BootstrapAuthenticationFailed,
+    PrincipalManagementDenied,
+)
+from valor.management_identity.application.evidence_query import (
+    ListManagementAuthenticationEvidenceHandler,
+    ListManagementAuthenticationEvidenceQuery,
+    ManagementAuthenticationEvidenceReaderPort,
+)
 from valor.management_identity.application.handlers import (
     BootstrapCommand,
     CreatePrincipalCommand,
@@ -22,6 +31,7 @@ from valor.management_identity.presentation.schemas import (
     CredentialMetadataResponse,
     IssueCredentialRequest,
     IssuedCredentialResponse,
+    ManagementAuthenticationEvidenceResponse,
     PrincipalResponse,
     SetTenantScopesRequest,
 )
@@ -35,8 +45,36 @@ def identity_service(request: Request) -> ManagementIdentityService:
     return cast(ManagementIdentityService, request.app.state.management_identity_service)
 
 
+def evidence_reader(request: Request) -> ManagementAuthenticationEvidenceReaderPort:
+    return cast(
+        ManagementAuthenticationEvidenceReaderPort,
+        request.app.state.management_authentication_evidence_reader,
+    )
+
+
 def actor(principal: AuthenticatedPrincipal) -> ManagementActor:
     return ManagementActor(principal.principal_id, principal.can_manage_principals)
+
+
+@router.get(
+    "/authentication-evidence",
+    response_model=list[ManagementAuthenticationEvidenceResponse],
+)
+async def list_authentication_evidence(
+    start: Annotated[datetime, Query()],
+    end: Annotated[datetime, Query()],
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
+    reader: Annotated[ManagementAuthenticationEvidenceReaderPort, Depends(evidence_reader)],
+    credential_id: Annotated[UUID | None, Query()] = None,
+    principal_id: Annotated[UUID | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> list[ManagementAuthenticationEvidenceResponse]:
+    if not principal.can_manage_principals:
+        raise PrincipalManagementDenied
+    values = await ListManagementAuthenticationEvidenceHandler(reader)(
+        ListManagementAuthenticationEvidenceQuery(credential_id, principal_id, start, end, limit)
+    )
+    return [ManagementAuthenticationEvidenceResponse.from_domain(value) for value in values]
 
 
 @router.post("/bootstrap", response_model=BootstrapResponse, status_code=status.HTTP_201_CREATED)

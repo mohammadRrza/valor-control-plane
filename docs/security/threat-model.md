@@ -153,6 +153,12 @@ The `(credential, outcome, hour)` key and idempotent insertion cap durable write
 payloads, source IPs, and user agents. It supports coarse forensic accountability, not exact attempt
 counts, attribution of mismatch traffic to the Principal, detection, alerting, or SIEM delivery.
 
+Only Principal managers can query this evidence. Queries require one exact credential or Principal
+filter, a timezone-aware range no longer than 31 days, and return at most 100 allow-listed metadata
+rows. Non-managers receive a non-disclosing 404 and unknown targets return an empty list. Residual
+risks include database tampering, bearer replay, lack of read-access auditing, and deliberately
+incomplete history because the endpoint has no pagination or export.
+
 ## STRIDE-oriented threat register
 
 | Category | Threat | Current control | Residual severity | Next control |
