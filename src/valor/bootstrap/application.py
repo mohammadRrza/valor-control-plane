@@ -25,6 +25,9 @@ from valor.management_audit.presentation.errors import install_management_audit_
 from valor.management_audit.presentation.routes import router as management_audit_router
 from valor.management_identity.application.authentication import ManagementAuthenticator
 from valor.management_identity.application.handlers import ManagementIdentityService
+from valor.management_identity.infrastructure.credential_inventory_reader import (
+    PostgresManagementCredentialInventoryReader,
+)
 from valor.management_identity.infrastructure.evidence_reader import (
     PostgresManagementAuthenticationEvidenceReader,
 )
@@ -88,6 +91,9 @@ def create_app(
         app.state.management_audit_reader = PostgresManagementAuditReader(database.sessions)
         app.state.management_authentication_evidence_reader = (
             PostgresManagementAuthenticationEvidenceReader(database.sessions)
+        )
+        app.state.management_credential_inventory_reader = (
+            PostgresManagementCredentialInventoryReader(database.sessions)
         )
         management_identity_uow_factory = partial(
             SqlAlchemyManagementIdentityUnitOfWork, database.sessions

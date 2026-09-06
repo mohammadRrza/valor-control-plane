@@ -79,6 +79,7 @@ GET  /api/v1/tenants/{tenant_id}/audit-records?start=...&end=...&limit=50
 POST /api/v1/management/bootstrap
 POST /api/v1/management/principals
 GET  /api/v1/management/principals/{principal_id}
+GET  /api/v1/management/principals/{principal_id}/credentials?limit=50
 PUT  /api/v1/management/principals/{principal_id}/tenant-scopes
 POST /api/v1/management/principals/{principal_id}/credentials
 POST /api/v1/management/principals/{principal_id}/credentials/{credential_id}/revoke
@@ -168,6 +169,17 @@ Principal managers can read this metadata through
 from 1 to 100. The default is 50. Non-managers receive a non-disclosing 404 and unknown identities
 return an empty list. The endpoint has no unfiltered mode, pagination, aggregation, export,
 dashboard, alerting, or SIEM integration.
+
+Principal managers can list bounded, non-secret credential metadata for exactly one Principal
+through `GET /api/v1/management/principals/{principal_id}/credentials`. Results are newest-first,
+return at most 100 items, and indicate truncation without adding pagination. `usable` is derived at
+read time; state precedence is Principal disabled, revoked, expired, then active. Credential
+secrets remain recoverable only from their initial issuance response.
+
+Manual rotation is: list credentials, issue a replacement, securely deploy the one-time bearer
+secret, verify it authenticates, list again, revoke the old credential, then confirm the old entry
+is revoked/unusable while the replacement remains active. Issuance never implicitly revokes the
+current credential, and inventory reads create no governance audit record.
 
 Runtime authentication does not replace authorization: an explicit ALLOW for the authenticated Tenant/Agent and requested Model remains required. Static runtime configuration has no issuance, rotation, revocation, expiry, rate limits, or workload federation, so this remains an interim boundary requiring TLS and secure secret injection.
 

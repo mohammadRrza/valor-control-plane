@@ -92,6 +92,13 @@ support both access paths. Presentation performs capability enforcement, applica
 validation, and infrastructure owns SQL. No Management Audit internals or Runtime identity code is
 used.
 
+Phase 4.4 adds a separate credential-inventory read model inside `management_identity`.
+Presentation calls an application handler through a narrow reader port; the PostgreSQL adapter
+filters by one exact Principal, orders by `created_at DESC, credential_id DESC`, and fetches only
+`limit + 1`. Application derives usability and the small operational state enum using an injectable
+clock. The metadata-only model remains separate from authentication evidence, lifecycle
+repositories, and Runtime identity.
+
 These are domain boundaries, not services. Identity & Tenancy supports Tenant creation/retrieval; AI Asset Registry supports Agent and Model registration/retrieval; Runtime Gateway supports one synchronous OpenAI Invocation; Policy & Risk supports one exact Agent-to-Model permission and decision history. Each context owns its architectural layers. Cross-context access uses explicit contracts rather than imports into another context's internals.
 
 ### Tenant slice decisions

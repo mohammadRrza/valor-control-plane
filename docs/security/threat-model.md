@@ -159,6 +159,13 @@ rows. Non-managers receive a non-disclosing 404 and unknown targets return an em
 risks include database tampering, bearer replay, lack of read-access auditing, and deliberately
 incomplete history because the endpoint has no pagination or export.
 
+Principal managers can inspect bounded credential metadata to identify active, expired, revoked,
+and Principal-disabled credentials during manual rotation. Inventory never exposes bearer secrets,
+verifiers, secret-derived fingerprints, authentication counts, or last-used facts. Reads are
+filtered to one exact Principal and do not create audit events. Residual risks include bearer
+replay, absent MFA/OIDC/proof-of-possession, manual rather than automatic rotation, pepper
+compromise or loss, no protected external audit storage, and static Runtime credentials.
+
 ## STRIDE-oriented threat register
 
 | Category | Threat | Current control | Residual severity | Next control |

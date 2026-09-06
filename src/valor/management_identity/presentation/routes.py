@@ -5,6 +5,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 
+from valor.management_identity.application.credential_inventory import (
+    ListManagementCredentialInventoryHandler,
+    ManagementCredentialInventoryReaderPort,
+)
 from valor.management_identity.application.errors import (
     BootstrapAuthenticationFailed,
     PrincipalManagementDenied,
@@ -28,6 +32,7 @@ from valor.management_identity.presentation.schemas import (
     BootstrapRequest,
     BootstrapResponse,
     CreatePrincipalRequest,
+    CredentialInventoryResponse,
     CredentialMetadataResponse,
     IssueCredentialRequest,
     IssuedCredentialResponse,
@@ -49,6 +54,13 @@ def evidence_reader(request: Request) -> ManagementAuthenticationEvidenceReaderP
     return cast(
         ManagementAuthenticationEvidenceReaderPort,
         request.app.state.management_authentication_evidence_reader,
+    )
+
+
+def credential_inventory_reader(request: Request) -> ManagementCredentialInventoryReaderPort:
+    return cast(
+        ManagementCredentialInventoryReaderPort,
+        request.app.state.management_credential_inventory_reader,
     )
 
 
@@ -120,6 +132,24 @@ async def get_principal(
     return PrincipalResponse.from_domain(
         await service.get_principal(actor(principal), principal_id)
     )
+
+
+@router.get(
+    "/principals/{principal_id}/credentials",
+    response_model=CredentialInventoryResponse,
+)
+async def list_principal_credentials(
+    principal_id: UUID,
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
+    reader: Annotated[
+        ManagementCredentialInventoryReaderPort, Depends(credential_inventory_reader)
+    ],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> CredentialInventoryResponse:
+    if not principal.can_manage_principals:
+        raise PrincipalManagementDenied
+    result = await ListManagementCredentialInventoryHandler(reader)(principal_id, limit)
+    return CredentialInventoryResponse.from_result(result)
 
 
 @router.put("/principals/{principal_id}/tenant-scopes", response_model=PrincipalResponse)

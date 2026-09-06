@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from valor.management_identity.application.credential_inventory import CredentialInventoryResult
 from valor.management_identity.application.handlers import IssuedCredential
 from valor.management_identity.domain.authentication_evidence import (
     ManagementAuthenticationEvidence,
@@ -94,4 +95,39 @@ class ManagementAuthenticationEvidenceResponse(BaseModel):
             outcome=value.outcome.value,
             bucket_started_at=value.bucket_started_at,
             first_observed_at=value.first_observed_at,
+        )
+
+
+class CredentialInventoryItemResponse(BaseModel):
+    credential_id: UUID
+    principal_id: UUID
+    label: str | None
+    created_at: datetime
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    usable: bool
+    state: str
+
+
+class CredentialInventoryResponse(BaseModel):
+    items: list[CredentialInventoryItemResponse]
+    truncated: bool
+
+    @classmethod
+    def from_result(cls, value: CredentialInventoryResult) -> "CredentialInventoryResponse":
+        return cls(
+            items=[
+                CredentialInventoryItemResponse(
+                    credential_id=item.credential_id,
+                    principal_id=item.principal_id,
+                    label=item.label,
+                    created_at=item.created_at,
+                    expires_at=item.expires_at,
+                    revoked_at=item.revoked_at,
+                    usable=item.usable,
+                    state=item.state.value,
+                )
+                for item in value.items
+            ],
+            truncated=value.truncated,
         )

@@ -152,6 +152,13 @@ def test_disable_invalidates_all_credentials(runtime_client: TestClient) -> None
     second = _issue(runtime_client, principal_id, "two")
     response = runtime_client.post(f"/api/v1/management/principals/{principal_id}/disable")
     assert response.status_code == 200
+    inventory = runtime_client.get(
+        f"/api/v1/management/principals/{principal_id}/credentials"
+    ).json()["items"]
+    assert len(inventory) == 2
+    assert all(item["state"] == "principal_disabled" for item in inventory)
+    assert all(item["usable"] is False for item in inventory)
+    assert all(item["revoked_at"] is None for item in inventory)
     for issued in (first, second):
         authentication = runtime_client.get(
             f"/api/v1/management/principals/{principal_id}",
@@ -466,3 +473,100 @@ def test_invalid_expiry_and_non_manager_capability_are_sanitized(
         json={"display_name": "Escalation", "tenant_ids": []},
     )
     assert denied.status_code == 404
+
+
+@pytest.mark.integration
+def test_credential_inventory_supports_safe_manual_rotation(
+    runtime_client: TestClient, runtime_database_url: str
+) -> None:
+    principal_id = _create_principal(runtime_client)
+    first = _issue(runtime_client, principal_id, "deployment-a")
+
+    initial = runtime_client.get(f"/api/v1/management/principals/{principal_id}/credentials")
+    assert initial.status_code == 200
+    assert initial.json()["truncated"] is False
+    assert initial.json()["items"][0] == {
+        "credential_id": first["credential_id"],
+        "principal_id": str(principal_id),
+        "label": "deployment-a",
+        "created_at": first["created_at"],
+        "expires_at": None,
+        "revoked_at": None,
+        "usable": True,
+        "state": "active",
+    }
+    serialized = initial.text
+    assert "bearer_token" not in serialized
+    assert "secret" not in serialized
+    assert "verifier" not in serialized
+    assert PEPPER not in serialized
+
+    second = _issue(runtime_client, principal_id, "deployment-b")
+    replacement_headers = {"Authorization": f"Bearer {second['bearer_token']}"}
+    assert (
+        runtime_client.get(
+            f"/api/v1/management/principals/{principal_id}",
+            headers=replacement_headers,
+        ).status_code
+        == 404
+    )
+    before_revoke = runtime_client.get(
+        f"/api/v1/management/principals/{principal_id}/credentials"
+    ).json()
+    assert [item["credential_id"] for item in before_revoke["items"]] == [
+        second["credential_id"],
+        first["credential_id"],
+    ]
+    assert all(item["usable"] for item in before_revoke["items"])
+
+    revoked = runtime_client.post(
+        f"/api/v1/management/principals/{principal_id}/credentials/{first['credential_id']}/revoke"
+    )
+    assert revoked.status_code == 200
+    after_revoke = runtime_client.get(
+        f"/api/v1/management/principals/{principal_id}/credentials", params={"limit": 1}
+    ).json()
+    assert after_revoke["truncated"] is True
+    all_items = runtime_client.get(
+        f"/api/v1/management/principals/{principal_id}/credentials"
+    ).json()["items"]
+    by_id = {item["credential_id"]: item for item in all_items}
+    assert by_id[str(first["credential_id"])]["state"] == "revoked"
+    assert by_id[str(first["credential_id"])]["usable"] is False
+    assert by_id[str(second["credential_id"])]["state"] == "active"
+    assert by_id[str(second["credential_id"])]["usable"] is True
+    assert (
+        runtime_client.get(
+            f"/api/v1/management/principals/{principal_id}",
+            headers={"Authorization": f"Bearer {first['bearer_token']}"},
+        ).status_code
+        == 401
+    )
+
+    assert (
+        runtime_client.get(
+            "/api/v1/management/principals/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/credentials"
+        ).status_code
+        == 404
+    )
+    assert (
+        runtime_client.get(
+            f"/api/v1/management/principals/{principal_id}/credentials",
+            headers=replacement_headers,
+        ).status_code
+        == 404
+    )
+
+    async def assert_inventory_read_did_not_audit() -> None:
+        engine = create_async_engine(runtime_database_url)
+        async with engine.connect() as connection:
+            count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM management_audit_records "
+                    "WHERE action = 'management_credential_inventory_read'"
+                )
+            )
+        await engine.dispose()
+        assert count == 0
+
+    asyncio.run(assert_inventory_read_did_not_audit())
