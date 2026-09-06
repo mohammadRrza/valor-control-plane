@@ -1,16 +1,49 @@
 from collections.abc import Sequence
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import delete, exists, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from valor.identity_tenancy.infrastructure.models import TenantRow
+from valor.management_identity.domain.authentication_evidence import (
+    ManagementAuthenticationEvidence,
+)
 from valor.management_identity.domain.models import ManagementCredential, ManagementPrincipal
 from valor.management_identity.infrastructure.models import (
+    ManagementAuthenticationEvidenceRow,
     ManagementCredentialRow,
     ManagementPrincipalRow,
     ManagementPrincipalTenantScopeRow,
 )
+
+
+class SqlAlchemyManagementAuthenticationEvidenceRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def observe(self, evidence: ManagementAuthenticationEvidence) -> None:
+        await self._session.execute(
+            delete(ManagementAuthenticationEvidenceRow).where(
+                ManagementAuthenticationEvidenceRow.bucket_started_at
+                < evidence.bucket_started_at - timedelta(days=90)
+            )
+        )
+        statement = (
+            insert(ManagementAuthenticationEvidenceRow)
+            .values(
+                credential_id=evidence.credential_id,
+                principal_id=evidence.principal_id,
+                outcome=evidence.outcome.value,
+                bucket_started_at=evidence.bucket_started_at,
+                first_observed_at=evidence.first_observed_at,
+            )
+            .on_conflict_do_nothing(
+                index_elements=("credential_id", "outcome", "bucket_started_at")
+            )
+        )
+        await self._session.execute(statement)
 
 
 class SqlAlchemyManagementPrincipalRepository:

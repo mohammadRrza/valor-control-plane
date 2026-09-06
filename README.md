@@ -118,9 +118,9 @@ src/valor/
     infrastructure/ append-only persistence and PostgreSQL reader
     presentation/   Tenant-scoped audit records route and errors
   management_identity/
-    domain/         persisted principal and credential lifecycle models
-    application/    bootstrap, authentication, lifecycle, and atomic audit orchestration
-    infrastructure/ SQLAlchemy repositories, UoW, and bootstrap serialization
+    domain/         persisted principal, credential lifecycle, and authentication evidence models
+    application/    bootstrap, authentication/evidence, lifecycle, and atomic audit orchestration
+    infrastructure/ SQLAlchemy repositories, bounded evidence, UoW, and bootstrap serialization
     presentation/   bootstrap and principal-management HTTP boundary
   security/
     application/    authenticated principal and explicit Tenant authorization rule
@@ -151,6 +151,16 @@ break-glass backdoor; recovery depends on protected database backups and operato
 This is a clean authentication cutover: the former static Management token is not an ordinary
 fallback. Audit rows written before migration 0015 retain their legacy actor strings unchanged;
 new governance evidence uses the persisted Principal UUID string.
+
+Management credential authentication also retains one idempotent evidence row per known
+credential, outcome, and UTC hour. Successful use and secret-proven revoked, expired, or disabled
+use are distinguishable; a wrong secret targeting a known credential is recorded only as a
+credential mismatch. Malformed and unknown bearer garbage is not persisted. Rows retain only
+credential/Principal UUIDs, outcome, bucket, and first-observed time, and buckets older than 90
+days are removed opportunistically. Exact attempt counts are deliberately unavailable so hostile
+repetition cannot create proportional durable writes. Every external authentication failure remains
+the same generic 401. Migration 0016 adds this evidence table; no read API, alerting, SIEM, IP/user
+agent collection, or Runtime authentication change is included.
 
 Runtime authentication does not replace authorization: an explicit ALLOW for the authenticated Tenant/Agent and requested Model remains required. Static runtime configuration has no issuance, rotation, revocation, expiry, rate limits, or workload federation, so this remains an interim boundary requiring TLS and secure secret injection.
 

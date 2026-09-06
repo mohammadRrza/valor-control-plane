@@ -2,6 +2,9 @@ from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
+from valor.management_identity.domain.authentication_evidence import (
+    ManagementAuthenticationEvidence,
+)
 from valor.management_identity.domain.models import ManagementCredential, ManagementPrincipal
 
 
@@ -22,3 +25,7 @@ class ManagementCredentialRepository(Protocol):
     async def list_for_principal(self, principal_id: UUID) -> Sequence[ManagementCredential]: ...
     async def revoke(self, credential: ManagementCredential) -> None: ...
     async def has_usable_for_principal(self, principal_id: UUID) -> bool: ...
+
+
+class ManagementAuthenticationEvidenceRepository(Protocol):
+    async def observe(self, evidence: ManagementAuthenticationEvidence) -> None: ...

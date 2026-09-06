@@ -12,6 +12,11 @@ from valor.management_identity.application.secrets import (
     parse_bearer_token,
     secret_verifier,
 )
+from valor.management_identity.domain.authentication_evidence import (
+    ManagementAuthenticationEvidence,
+    ManagementAuthenticationOutcome,
+    hourly_bucket,
+)
 from valor.management_identity.domain.models import ManagementCredential, ManagementPrincipal
 
 NOW = datetime(2026, 9, 6, tzinfo=UTC)
@@ -83,6 +88,26 @@ def test_generated_bearer_has_public_id_and_high_entropy_secret() -> None:
     assert parse_bearer_token("malformed") is None
 
 
+def test_authentication_evidence_requires_the_exact_utc_hour_bucket() -> None:
+    observed = NOW + timedelta(minutes=37)
+    value = ManagementAuthenticationEvidence(
+        CREDENTIAL_ID,
+        PRINCIPAL_ID,
+        ManagementAuthenticationOutcome.SUCCEEDED,
+        hourly_bucket(observed),
+        observed,
+    )
+    assert value.bucket_started_at == NOW
+    with pytest.raises(ValueError, match="UTC hourly bucket"):
+        ManagementAuthenticationEvidence(
+            CREDENTIAL_ID,
+            PRINCIPAL_ID,
+            ManagementAuthenticationOutcome.SUCCEEDED,
+            observed,
+            observed,
+        )
+
+
 class PrincipalRepository:
     def __init__(self, value: ManagementPrincipal | None) -> None:
         self.value = value
@@ -109,6 +134,8 @@ class AuthenticationUow:
     ) -> None:
         self.principals = PrincipalRepository(principal_value)
         self.credentials = CredentialRepository(credential_value)
+        self.authentication_evidence = EvidenceRepository()
+        self.commits = 0
 
     async def __aenter__(self) -> Self:
         return self
@@ -121,6 +148,17 @@ class AuthenticationUow:
     ) -> None:
         pass
 
+    async def commit(self) -> None:
+        self.commits += 1
+
+
+class EvidenceRepository:
+    def __init__(self) -> None:
+        self.values: list[ManagementAuthenticationEvidence] = []
+
+    async def observe(self, evidence: ManagementAuthenticationEvidence) -> None:
+        self.values.append(evidence)
+
 
 class Factory:
     def __init__(
@@ -130,11 +168,13 @@ class Factory:
     ) -> None:
         self.principal = principal_value
         self.credential = credential_value
+        self.created: AuthenticationUow | None = None
 
     def __call__(self) -> ManagementIdentityUnitOfWork:
+        self.created = AuthenticationUow(self.principal, self.credential)
         return cast(
             ManagementIdentityUnitOfWork,
-            AuthenticationUow(self.principal, self.credential),
+            self.created,
         )
 
 
@@ -152,20 +192,46 @@ async def test_authentication_failures_are_indistinguishable(failure: str) -> No
         credential_value = None
     if failure == "wrong":
         token = token.rsplit("_", 1)[0] + "_wrong-secret"
-    result = await ManagementAuthenticator(
-        Factory(principal_value, credential_value), PEPPER
-    ).authenticate(token, now=NOW + (timedelta(hours=2) if failure == "expired" else timedelta()))
+    factory = Factory(principal_value, credential_value)
+    result = await ManagementAuthenticator(factory, PEPPER).authenticate(
+        token, now=NOW + (timedelta(hours=2) if failure == "expired" else timedelta())
+    )
     assert result is None
+    assert factory.created is not None
+    evidence = factory.created.authentication_evidence.values
+    if failure == "unknown":
+        assert evidence == []
+        assert factory.created.commits == 0
+    else:
+        expected = {
+            "wrong": ManagementAuthenticationOutcome.CREDENTIAL_MISMATCH,
+            "revoked": ManagementAuthenticationOutcome.REVOKED,
+            "expired": ManagementAuthenticationOutcome.EXPIRED,
+            "disabled": ManagementAuthenticationOutcome.PRINCIPAL_DISABLED,
+        }
+        assert [item.outcome for item in evidence] == [expected[failure]]
+        assert factory.created.commits == 1
 
 
 @pytest.mark.asyncio
 async def test_valid_authentication_returns_ids_scopes_and_capability() -> None:
     token, secret = generate_bearer_token(CREDENTIAL_ID)
-    result = await ManagementAuthenticator(
-        Factory(principal(), credential(secret, expires_at=NOW + timedelta(days=1))), PEPPER
-    ).authenticate(token, now=NOW)
+    factory = Factory(principal(), credential(secret, expires_at=NOW + timedelta(days=1)))
+    result = await ManagementAuthenticator(factory, PEPPER).authenticate(token, now=NOW)
     assert result is not None
     assert result.principal_id == PRINCIPAL_ID
     assert result.credential_id == CREDENTIAL_ID
     assert result.authorized_tenant_ids == frozenset({TENANT_ID})
     assert result.can_manage_principals
+    assert factory.created is not None
+    assert [item.outcome for item in factory.created.authentication_evidence.values] == [
+        ManagementAuthenticationOutcome.SUCCEEDED
+    ]
+    assert factory.created.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_malformed_external_garbage_creates_no_unit_of_work_or_evidence() -> None:
+    factory = Factory(None, None)
+    assert await ManagementAuthenticator(factory, PEPPER).authenticate("garbage", now=NOW) is None
+    assert factory.created is None

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from valor.infrastructure.sqlalchemy import SqlAlchemyBase
@@ -48,3 +48,33 @@ class ManagementCredentialRow(SqlAlchemyBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ManagementAuthenticationEvidenceRow(SqlAlchemyBase):
+    __tablename__ = "management_authentication_evidence"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('succeeded', 'credential_mismatch', 'revoked', 'expired', "
+            "'principal_disabled')",
+            name="ck_management_authentication_evidence_outcome",
+        ),
+        Index("ix_management_auth_evidence_bucket", "bucket_started_at"),
+    )
+
+    credential_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "management_credentials.credential_id",
+            name="fk_management_auth_evidence_credential",
+        ),
+        primary_key=True,
+    )
+    principal_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "management_principals.principal_id",
+            name="fk_management_auth_evidence_principal",
+        ),
+        nullable=False,
+    )
+    outcome: Mapped[str] = mapped_column(String(32), primary_key=True)
+    bucket_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    first_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

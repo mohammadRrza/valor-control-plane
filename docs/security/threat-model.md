@@ -61,7 +61,7 @@ Implemented controls:
 Tenant creation is an authenticated provisioning exception. It does not automatically grant scope.
 
 Residual threats include bearer theft and replay, no MFA or external identity proof, compromise of
-both database and pepper, bootstrap-secret exposure before initialization, no credential-use audit,
+both database and pepper, bootstrap-secret exposure before initialization, no protected/WORM storage,
 no automatic rotation, and no hidden break-glass recovery.
 
 ### Runtime client to Runtime Gateway
@@ -142,8 +142,16 @@ provider execution.
 
 Successful permission changes now retain the stable Management principal ID and before/after state
 fingerprints atomically with the mutation. Residual threats include a stolen authorized credential,
-failed attempts that are not durably audited, database-superuser tampering, and lack of approval or
-cryptographic evidence chaining. Credentials and full request payloads are never audit fields.
+database-superuser tampering, and lack of approval or cryptographic evidence chaining. Credentials
+and full request payloads are never audit fields.
+
+Management credential authentication retains bounded UTC-hour evidence for successful use,
+known-credential secret mismatch, and secret-proven revoked, expired, or disabled use. Malformed
+and unknown values are discarded, which prevents internet garbage from creating unbounded rows.
+The `(credential, outcome, hour)` key and idempotent insertion cap durable writes under repetition;
+90-day opportunistic retention bounds time. Evidence excludes secrets, verifiers, headers,
+payloads, source IPs, and user agents. It supports coarse forensic accountability, not exact attempt
+counts, attribution of mismatch traffic to the Principal, detection, alerting, or SIEM delivery.
 
 ## STRIDE-oriented threat register
 
@@ -187,6 +195,7 @@ Implemented strengths:
 - provider-secret isolation and sanitized upstream failures;
 - PostgreSQL integrity constraints and explicit transactions;
 - atomic actor-correlated audit evidence for successful Agent-to-Model permission changes.
+- bounded, secret-free Management credential-use evidence with generic external failures.
 
 Material gaps:
 
@@ -194,7 +203,7 @@ Material gaps:
 2. Sensitive Invocation data retention/redaction policy — High/Medium.
 3. Management bearer replay, external identity proof, MFA, and recovery procedures — Medium.
 4. Concurrency-safe reservations and request-rate limits — Medium.
-5. Failed-attempt audit and protected evidence storage — Medium.
+5. Protected/WORM evidence storage and operational evidence access — Medium.
 
 ## Recommended sequence
 

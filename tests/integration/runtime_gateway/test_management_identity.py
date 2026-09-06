@@ -240,6 +240,84 @@ def test_invalid_bootstrap_secret_is_generic_unauthorized(
     assert "wrong-bootstrap-secret" not in response.text
 
 
+@pytest.mark.integration
+def test_authentication_evidence_is_secret_free_attributable_and_hourly_bounded(
+    runtime_client: TestClient, runtime_database_url: str
+) -> None:
+    principal_id = _create_principal(runtime_client, name="Evidence Operator")
+    issued = _issue(runtime_client, principal_id, "evidence credential")
+    credential_id = UUID(str(issued["credential_id"]))
+    token = str(issued["bearer_token"])
+    path = f"/api/v1/management/principals/{principal_id}"
+    valid_headers = {"Authorization": f"Bearer {token}"}
+    invalid_token = token.rsplit("_", 1)[0] + "_incorrect-secret"
+
+    async def insert_expired_bucket() -> None:
+        engine = create_async_engine(runtime_database_url)
+        old = datetime.now(UTC) - timedelta(days=91)
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "INSERT INTO management_authentication_evidence "
+                    "(credential_id, principal_id, outcome, bucket_started_at, "
+                    "first_observed_at) VALUES "
+                    "(:credential_id, :principal_id, 'succeeded', :bucket, :observed)"
+                ),
+                {
+                    "credential_id": credential_id,
+                    "principal_id": principal_id,
+                    "bucket": old.replace(minute=0, second=0, microsecond=0),
+                    "observed": old,
+                },
+            )
+        await engine.dispose()
+
+    asyncio.run(insert_expired_bucket())
+
+    for _ in range(3):
+        assert runtime_client.get(path, headers=valid_headers).status_code == 404
+        invalid = runtime_client.get(path, headers={"Authorization": f"Bearer {invalid_token}"})
+        assert invalid.status_code == 401
+        assert invalid.headers["WWW-Authenticate"] == "Bearer"
+        assert invalid.json()["detail"] == "Authentication credentials are missing or invalid."
+
+    unknown = f"valor_mgmt_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa_{token[-20:]}"
+    assert (
+        runtime_client.get(path, headers={"Authorization": f"Bearer {unknown}"}).status_code == 401
+    )
+    assert runtime_client.get(path, headers={"Authorization": "Bearer garbage"}).status_code == 401
+
+    async def read_rows() -> list[tuple[str, int, int]]:
+        engine = create_async_engine(runtime_database_url)
+        async with engine.connect() as connection:
+            result = await connection.execute(
+                text(
+                    "SELECT outcome, count(*), count(DISTINCT bucket_started_at) "
+                    "FROM management_authentication_evidence "
+                    "WHERE credential_id = :credential_id GROUP BY outcome ORDER BY outcome"
+                ),
+                {"credential_id": credential_id},
+            )
+            rows = [(str(row[0]), int(row[1]), int(row[2])) for row in result]
+            serialized = await connection.scalar(
+                text(
+                    "SELECT string_agg(row_to_json(e)::text, '') "
+                    "FROM management_authentication_evidence e "
+                    "WHERE credential_id = :credential_id"
+                ),
+                {"credential_id": credential_id},
+            )
+        await engine.dispose()
+        assert token not in str(serialized)
+        assert invalid_token not in str(serialized)
+        return rows
+
+    assert asyncio.run(read_rows()) == [
+        ("credential_mismatch", 1, 1),
+        ("succeeded", 1, 1),
+    ]
+
+
 class _FailingAudit:
     async def append(self, record: object) -> None:
         del record

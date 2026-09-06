@@ -5,10 +5,12 @@ from valor.management_audit.domain.repositories import ManagementAuditRepository
 from valor.management_audit.infrastructure.repositories import SqlAlchemyManagementAuditRepository
 from valor.management_identity.application.ports import TenantExistencePort
 from valor.management_identity.domain.repositories import (
+    ManagementAuthenticationEvidenceRepository,
     ManagementCredentialRepository,
     ManagementPrincipalRepository,
 )
 from valor.management_identity.infrastructure.repositories import (
+    SqlAlchemyManagementAuthenticationEvidenceRepository,
     SqlAlchemyManagementCredentialRepository,
     SqlAlchemyManagementPrincipalRepository,
     SqlAlchemyTenantExistence,
@@ -16,6 +18,12 @@ from valor.management_identity.infrastructure.repositories import (
 
 
 class SqlAlchemyManagementIdentityUnitOfWork(SqlAlchemyUnitOfWork):
+    @property
+    def authentication_evidence(self) -> ManagementAuthenticationEvidenceRepository:
+        if self.session is None:
+            raise RuntimeError("Unit of Work has not been entered")
+        return SqlAlchemyManagementAuthenticationEvidenceRepository(self.session)
+
     @property
     def principals(self) -> ManagementPrincipalRepository:
         if self.session is None:

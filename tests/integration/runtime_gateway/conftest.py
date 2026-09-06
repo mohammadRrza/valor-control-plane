@@ -62,6 +62,7 @@ async def clean_runtime_tables(runtime_database_url: str) -> AsyncIterator[None]
     engine = create_async_engine(runtime_database_url)
     async with engine.begin() as connection:
         await connection.execute(text("DELETE FROM management_audit_records"))
+        await connection.execute(text("DELETE FROM management_authentication_evidence"))
         await connection.execute(text("DELETE FROM management_credentials"))
         await connection.execute(text("DELETE FROM management_principal_tenant_scopes"))
         await connection.execute(text("DELETE FROM management_principals"))
@@ -74,6 +75,7 @@ async def clean_runtime_tables(runtime_database_url: str) -> AsyncIterator[None]
     yield
     async with engine.begin() as connection:
         await connection.execute(text("DELETE FROM management_audit_records"))
+        await connection.execute(text("DELETE FROM management_authentication_evidence"))
         await connection.execute(text("DELETE FROM management_credentials"))
         await connection.execute(text("DELETE FROM management_principal_tenant_scopes"))
         await connection.execute(text("DELETE FROM management_principals"))

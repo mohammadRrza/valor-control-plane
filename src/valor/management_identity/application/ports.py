@@ -4,6 +4,7 @@ from uuid import UUID
 from valor.application.unit_of_work import UnitOfWork
 from valor.management_audit.domain.repositories import ManagementAuditRepository
 from valor.management_identity.domain.repositories import (
+    ManagementAuthenticationEvidenceRepository,
     ManagementCredentialRepository,
     ManagementPrincipalRepository,
 )
@@ -18,6 +19,8 @@ class ManagementIdentityUnitOfWork(UnitOfWork, Protocol):
     def principals(self) -> ManagementPrincipalRepository: ...
     @property
     def credentials(self) -> ManagementCredentialRepository: ...
+    @property
+    def authentication_evidence(self) -> ManagementAuthenticationEvidenceRepository: ...
     @property
     def tenants(self) -> TenantExistencePort: ...
     @property

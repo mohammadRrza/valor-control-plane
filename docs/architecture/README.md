@@ -77,6 +77,14 @@ audit Tenant correlation; its Principal fingerprint includes sorted exact scopes
 Tenant-owned permission evidence remains non-null and Tenant-queryable. A recoverability check prevents disabling the last
 active manager or revoking its last usable credential. Runtime identity remains unrelated.
 
+Phase 4.2 keeps credential-use accountability inside `management_identity`. Authentication writes
+at most one first-observation row for each known credential/outcome/UTC-hour tuple and prunes rows
+older than 90 days. Successful possession, credential mismatch, and secret-proven lifecycle
+failures have distinct internal outcomes while the HTTP boundary remains one generic 401. Unknown
+or malformed external values do not become database records. This evidence is deliberately not a
+`management_audit` mutation record or a generic event platform; Runtime authentication is outside
+its boundary.
+
 These are domain boundaries, not services. Identity & Tenancy supports Tenant creation/retrieval; AI Asset Registry supports Agent and Model registration/retrieval; Runtime Gateway supports one synchronous OpenAI Invocation; Policy & Risk supports one exact Agent-to-Model permission and decision history. Each context owns its architectural layers. Cross-context access uses explicit contracts rather than imports into another context's internals.
 
 ### Tenant slice decisions
@@ -236,6 +244,11 @@ Bearer secrets are returned only from issuance/bootstrap responses and are never
 stored values, subsequent response fields, or logging fields. Authentication proves possession; a
 separate framework-independent rule authorizes exact Tenant UUID membership. Empty scope grants
 nothing and no wildcard Tenant authority exists.
+
+Credential-use evidence contains only credential and Principal UUIDs, an outcome, a UTC-hour
+bucket, and first-observed time. It contains no token, secret, verifier, pepper, Authorization
+header, request body, IP address, or user agent. Revoked, expired, and disabled outcomes require a
+matching secret, so those rows demonstrate possession rather than UUID knowledge alone.
 
 Tenant GET authorizes its path identity before loading. Agent, Model, and Permission creation/mutation authorizes the supplied Tenant before business work; retrieval authorizes the aggregate's owning Tenant before presentation. Denials reuse each resource's existing 404 response, preventing cross-Tenant enumeration. Tenant creation alone remains an authenticated provisioning exception: it creates no grant, so the manager must explicitly replace its persisted Tenant scopes before the generated Tenant can be managed.
 
