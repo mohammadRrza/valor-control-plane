@@ -20,3 +20,4 @@ ADRs record decisions at the time they are made. Supersede rather than silently 
 - [ADR-0016](0016-aggregate-tenant-runtime-reporting.md) — bounded Tenant Runtime aggregation from Invocation evidence
 - [ADR-0017](0017-enforce-tenant-daily-estimated-cost-budget.md) — fail-closed Tenant daily estimated-cost governance
 - [ADR-0018](0018-atomic-management-governance-audit.md) — atomic fingerprint-only Management governance audit
+- [ADR-0019](0019-persist-management-principals-and-credentials.md) — persisted Management principals and independent bearer credential rotation

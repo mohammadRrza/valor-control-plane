@@ -109,9 +109,14 @@ def test_duplicate_tenant_budget_configuration_fails_fast() -> None:
 
 def test_database_url_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VALOR_DATABASE__URL", raising=False)
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_PRINCIPAL_ID", "test-management")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_TOKEN", "test-only-management-token-32-bytes")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_TENANT_IDS", "[]")
+    monkeypatch.setenv(
+        "VALOR_SECURITY__MANAGEMENT_BOOTSTRAP_TOKEN",
+        "test-only-management-bootstrap-token-32-bytes",
+    )
+    monkeypatch.setenv(
+        "VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER",
+        "test-only-management-pepper-value-32-bytes",
+    )
     monkeypatch.setenv("VALOR_RUNTIME_AUTH__PRINCIPALS", "[]")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
@@ -121,11 +126,13 @@ def test_nested_environment_configuration(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("VALOR_DATABASE__URL", "postgresql+psycopg://user:pass@db:5432/valor")
     monkeypatch.setenv("VALOR_APPLICATION__ENVIRONMENT", "staging")
     monkeypatch.setenv("VALOR_PROVIDER__OPENAI_API_KEY", "test-secret")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_PRINCIPAL_ID", "ops-console")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_TOKEN", "test-only-management-token-32-bytes")
     monkeypatch.setenv(
-        "VALOR_SECURITY__MANAGEMENT_TENANT_IDS",
-        '["11111111-1111-4111-8111-111111111111"]',
+        "VALOR_SECURITY__MANAGEMENT_BOOTSTRAP_TOKEN",
+        "test-only-management-bootstrap-token-32-bytes",
+    )
+    monkeypatch.setenv(
+        "VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER",
+        "test-only-management-pepper-value-32-bytes",
     )
     monkeypatch.setenv(
         "VALOR_RUNTIME_AUTH__PRINCIPALS",
@@ -140,18 +147,19 @@ def test_nested_environment_configuration(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.provider.openai_api_key is not None
     assert settings.provider.openai_api_key.get_secret_value() == "test-secret"
     assert "test-secret" not in repr(settings)
-    assert settings.security.management_principal_id == "ops-console"
-    assert settings.security.management_tenant_ids == {UUID("11111111-1111-4111-8111-111111111111")}
-    assert "test-only-management-token-32-bytes" not in repr(settings)
+    assert (
+        settings.security.management_bootstrap_token.get_secret_value()
+        == "test-only-management-bootstrap-token-32-bytes"
+    )
+    assert "test-only-management-bootstrap-token-32-bytes" not in repr(settings)
     assert settings.runtime_auth.principals[0].principal_id == "runtime-a"
     assert "runtime-test-secret-at-least-32-bytes" not in repr(settings)
 
 
 def test_management_credentials_are_required(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VALOR_DATABASE__URL", "postgresql+psycopg://user:pass@db:5432/valor")
-    monkeypatch.delenv("VALOR_SECURITY__MANAGEMENT_PRINCIPAL_ID", raising=False)
-    monkeypatch.delenv("VALOR_SECURITY__MANAGEMENT_TOKEN", raising=False)
-    monkeypatch.delenv("VALOR_SECURITY__MANAGEMENT_TENANT_IDS", raising=False)
+    monkeypatch.delenv("VALOR_SECURITY__MANAGEMENT_BOOTSTRAP_TOKEN", raising=False)
+    monkeypatch.delenv("VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER", raising=False)
     monkeypatch.setenv("VALOR_RUNTIME_AUTH__PRINCIPALS", "[]")
     with pytest.raises(ValidationError) as error:
         Settings(_env_file=None)
@@ -159,13 +167,15 @@ def test_management_credentials_are_required(monkeypatch: pytest.MonkeyPatch) ->
     assert "test-only-management-token" not in str(error.value)
 
 
-def test_malformed_management_tenant_scope_fails_fast(
+def test_short_management_bootstrap_secret_fails_fast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("VALOR_DATABASE__URL", "postgresql+psycopg://user:pass@db:5432/valor")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_PRINCIPAL_ID", "test-management")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_TOKEN", "test-only-management-token-32-bytes")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_TENANT_IDS", '["not-a-uuid"]')
+    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_BOOTSTRAP_TOKEN", "short")
+    monkeypatch.setenv(
+        "VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER",
+        "test-only-management-pepper-value-32-bytes",
+    )
     monkeypatch.setenv("VALOR_RUNTIME_AUTH__PRINCIPALS", "[]")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
@@ -210,15 +220,14 @@ def test_ambiguous_runtime_principal_configuration_fails(duplicate: str) -> None
         RuntimeAuthenticationSettings(principals=(first, second))
 
 
-def test_management_credential_cannot_be_configured_as_runtime_credential() -> None:
+def test_bootstrap_credential_cannot_be_configured_as_runtime_credential() -> None:
     shared_credential = "shared-test-credential-at-least-32-bytes"
     with pytest.raises(ValidationError):
         Settings(
             database=DatabaseSettings(url="postgresql+psycopg://valor:valor@localhost:5432/valor"),
             security=SecuritySettings(
-                management_principal_id="management",
-                management_token=shared_credential,
-                management_tenant_ids=frozenset(),
+                management_bootstrap_token=shared_credential,
+                management_credential_pepper="unit-management-pepper-at-least-32-bytes",
             ),
             runtime_auth=RuntimeAuthenticationSettings(
                 principals=(
@@ -229,6 +238,15 @@ def test_management_credential_cannot_be_configured_as_runtime_credential() -> N
                     ),
                 )
             ),
+        )
+
+
+def test_bootstrap_token_and_pepper_must_be_distinct() -> None:
+    shared = "shared-management-secret-at-least-32-bytes"
+    with pytest.raises(ValidationError):
+        SecuritySettings(
+            management_bootstrap_token=shared,
+            management_credential_pepper=shared,
         )
 
 

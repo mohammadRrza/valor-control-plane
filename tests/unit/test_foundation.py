@@ -15,9 +15,14 @@ def test_domain_event_has_identity_and_utc_timestamp() -> None:
 def test_settings_factory_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
     monkeypatch.setenv("VALOR_DATABASE__URL", "postgresql+psycopg://user:pass@localhost:5432/valor")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_PRINCIPAL_ID", "test-management")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_TOKEN", "test-only-management-token-32-bytes")
-    monkeypatch.setenv("VALOR_SECURITY__MANAGEMENT_TENANT_IDS", "[]")
+    monkeypatch.setenv(
+        "VALOR_SECURITY__MANAGEMENT_BOOTSTRAP_TOKEN",
+        "test-only-management-bootstrap-token-32-bytes",
+    )
+    monkeypatch.setenv(
+        "VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER",
+        "test-only-management-pepper-value-32-bytes",
+    )
     monkeypatch.setenv("VALOR_RUNTIME_AUTH__PRINCIPALS", "[]")
     assert get_settings().database.url.hosts()[0]["host"] == "localhost"
     get_settings.cache_clear()

@@ -11,10 +11,12 @@ class PrincipalKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class AuthenticatedPrincipal:
-    principal_id: str
+    principal_id: UUID
+    credential_id: UUID
     principal_kind: PrincipalKind
     authorized_tenant_ids: frozenset[UUID]
+    can_manage_principals: bool
 
     def __post_init__(self) -> None:
-        if not self.principal_id.strip():
-            raise ValueError("principal_id must not be empty")
+        if self.principal_id.int == 0 or self.credential_id.int == 0:
+            raise ValueError("principal and credential IDs must not be nil UUIDs")

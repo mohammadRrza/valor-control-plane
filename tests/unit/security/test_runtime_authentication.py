@@ -27,9 +27,8 @@ def runtime_authentication_client() -> TestClient:
     app.state.settings = Settings(
         database=DatabaseSettings(url="postgresql+psycopg://valor:valor@localhost/valor"),
         security=SecuritySettings(
-            management_principal_id="management",
-            management_token="unit-management-credential-at-least-32-bytes",
-            management_tenant_ids=frozenset(),
+            management_bootstrap_token="unit-management-bootstrap-at-least-32-bytes",
+            management_credential_pepper="unit-management-pepper-at-least-32-bytes",
         ),
         runtime_auth=RuntimeAuthenticationSettings(
             principals=(

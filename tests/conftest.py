@@ -12,17 +12,14 @@ from valor.bootstrap.settings import (
     Settings,
 )
 
-TEST_MANAGEMENT_TOKEN = "test-only-management-token-32-bytes"
-
 
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
         database=DatabaseSettings(url="postgresql+psycopg://valor:valor@localhost:5432/valor"),
         security=SecuritySettings(
-            management_principal_id="test-management",
-            management_token=TEST_MANAGEMENT_TOKEN,
-            management_tenant_ids=frozenset(),
+            management_bootstrap_token="test-only-management-bootstrap-token-32-bytes",
+            management_credential_pepper="test-only-management-pepper-value-32-bytes",
         ),
         runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )

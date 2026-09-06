@@ -8,10 +8,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.integration.runtime_gateway.conftest import (
-    TEST_MANAGEMENT_TOKEN,
-    DeterministicRuntimeProvider,
+from tests.integration.management_helpers import (
+    bootstrap_management,
+    grant_management_scopes,
+    set_management_scopes,
 )
+from tests.integration.runtime_gateway.conftest import DeterministicRuntimeProvider
 from valor.bootstrap.settings import (
     PricingEntrySettings,
     PricingSettings,
@@ -103,8 +105,7 @@ def create_tenant(client: TestClient, name: str) -> UUID:
     response = client.post("/api/v1/tenants", json={"name": name})
     assert response.status_code == 201
     tenant_id = UUID(response.json()["id"])
-    security = cast(FastAPI, client.app).state.settings.security
-    security.management_tenant_ids = security.management_tenant_ids | {tenant_id}
+    grant_management_scopes(client, {tenant_id})
     configure_tenant_budget(client, tenant_id)
     return tenant_id
 
@@ -286,8 +287,7 @@ def test_tenant_runtime_report_is_management_scoped_and_empty_is_explicit(
     tenant_a = create_tenant(runtime_client, "Reporting Tenant A")
     tenant_b = create_tenant(runtime_client, "Reporting Tenant B")
     agent_a = create_agent(runtime_client, tenant_a, "Reporting Runtime Agent")
-    security = cast(FastAPI, runtime_client.app).state.settings.security
-    security.management_tenant_ids = frozenset({tenant_a})
+    set_management_scopes(runtime_client, {tenant_a})
     start = datetime(2026, 9, 1, tzinfo=UTC)
     params = {"start": start.isoformat(), "end": (start + timedelta(days=1)).isoformat()}
 
@@ -348,9 +348,15 @@ def test_tenant_runtime_report_requires_auth_and_valid_bounded_aware_range(
     valid = {"start": aware.isoformat(), "end": (aware + timedelta(days=1)).isoformat()}
     assert unauthenticated_runtime_client.get(path, params=valid).status_code == 401
 
-    app = cast(FastAPI, unauthenticated_runtime_client.app)
-    app.state.settings.security.management_tenant_ids = frozenset({tenant_id})
-    headers = {"Authorization": f"Bearer {TEST_MANAGEMENT_TOKEN}"}
+    token = bootstrap_management(unauthenticated_runtime_client)
+    tenant_id = UUID(
+        unauthenticated_runtime_client.post(
+            "/api/v1/tenants", json={"name": "Range Validation Tenant"}
+        ).json()["id"]
+    )
+    path = f"/api/v1/tenants/{tenant_id}/runtime-report"
+    set_management_scopes(unauthenticated_runtime_client, {tenant_id})
+    headers = {"Authorization": f"Bearer {token}"}
     invalid_ranges = [
         {"start": "2026-09-01T00:00:00", "end": "2026-09-02T00:00:00Z"},
         {"start": "2026-09-01T00:00:00Z", "end": "2026-09-02T00:00:00"},
@@ -388,13 +394,14 @@ def test_runtime_api_rejects_missing_invalid_and_management_credentials(
     unauthenticated_runtime_client: TestClient,
     method: str,
 ) -> None:
+    management_token = bootstrap_management(unauthenticated_runtime_client)
     path = (
         "/api/v1/runtime/invocations"
         if method == "post"
         else f"/api/v1/runtime/invocations/{uuid4()}"
     )
     payload = {"model_id": str(uuid4()), "input": "runtime"} if method == "post" else None
-    for authorization in (None, "Bearer invalid-runtime", f"Bearer {TEST_MANAGEMENT_TOKEN}"):
+    for authorization in (None, "Bearer invalid-runtime", f"Bearer {management_token}"):
         headers = {} if authorization is None else {"Authorization": authorization}
         response = unauthenticated_runtime_client.request(
             method, path, json=payload, headers=headers
@@ -403,7 +410,7 @@ def test_runtime_api_rejects_missing_invalid_and_management_credentials(
         assert response.headers["WWW-Authenticate"] == "Bearer"
         assert_problem(response.status_code, response.headers["content-type"], response.json())
         assert "invalid-runtime" not in response.text
-        assert TEST_MANAGEMENT_TOKEN not in response.text
+        assert management_token not in response.text
 
 
 @pytest.mark.integration
@@ -510,8 +517,7 @@ async def test_tenant_scoped_management_authorization_is_non_disclosing_and_fail
     configure_tenant_budget(runtime_client, tenant_a)
     configure_tenant_budget(runtime_client, tenant_b)
 
-    security = cast(FastAPI, runtime_client.app).state.settings.security
-    security.management_tenant_ids = frozenset({tenant_a, tenant_b})
+    set_management_scopes(runtime_client, {tenant_a, tenant_b})
     agent_a = create_agent(runtime_client, tenant_a, "Agent A")
     model_a = create_model(runtime_client, tenant_a, "Model A")
     agent_b = create_agent(runtime_client, tenant_b, "Agent B")
@@ -522,7 +528,7 @@ async def test_tenant_scoped_management_authorization_is_non_disclosing_and_fail
         runtime_client, tenant_b, audit_agent_b, audit_model_b, "deny"
     )
 
-    security.management_tenant_ids = frozenset({tenant_a})
+    set_management_scopes(runtime_client, {tenant_a})
     assert runtime_client.get(f"/api/v1/tenants/{tenant_a}").status_code == 200
     assert runtime_client.get(f"/api/v1/tenants/{tenant_b}").status_code == 404
     assert runtime_client.get(f"/api/v1/agents/{agent_a}").status_code == 200
@@ -694,15 +700,15 @@ def test_anonymous_policy_mutation_cannot_bypass_default_deny(
     unauthenticated_runtime_client: TestClient,
     runtime_provider: DeterministicRuntimeProvider,
 ) -> None:
-    auth = {"Authorization": f"Bearer {TEST_MANAGEMENT_TOKEN}"}
+    management_token = bootstrap_management(unauthenticated_runtime_client)
+    auth = {"Authorization": f"Bearer {management_token}"}
     tenant_response = unauthenticated_runtime_client.post(
         "/api/v1/tenants", json={"name": "Security Regression"}, headers=auth
     )
     assert tenant_response.status_code == 201
     tenant_id = UUID(tenant_response.json()["id"])
     configure_tenant_budget(unauthenticated_runtime_client, tenant_id)
-    security = cast(FastAPI, unauthenticated_runtime_client.app).state.settings.security
-    security.management_tenant_ids = frozenset({tenant_id})
+    set_management_scopes(unauthenticated_runtime_client, {tenant_id})
     agent_response = unauthenticated_runtime_client.post(
         "/api/v1/agents",
         json={"tenant_id": str(tenant_id), "name": "Security Agent"},
@@ -727,6 +733,7 @@ def test_anonymous_policy_mutation_cannot_bypass_default_deny(
         "model_id": str(model_id),
         "effect": "allow",
     }
+    del unauthenticated_runtime_client.headers["Authorization"]
 
     anonymous_allow = unauthenticated_runtime_client.put(
         "/api/v1/policies/agent-model-permissions", json=permission_payload

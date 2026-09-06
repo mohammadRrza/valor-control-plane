@@ -2,6 +2,9 @@
 
 **Status:** Accepted
 
+ADR-0019 preserves the exact-membership authorization rule while moving scope storage from
+deployment configuration to persisted Management Principal state.
+
 ## Context
 
 Static bearer authentication establishes one management principal, but possession of that global

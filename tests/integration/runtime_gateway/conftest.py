@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from tests.integration.management_helpers import BOOTSTRAP_TOKEN, PEPPER, bootstrap_management
 from valor.bootstrap.application import create_app
 from valor.bootstrap.settings import (
     DatabaseSettings,
@@ -48,9 +49,6 @@ class DeterministicRuntimeProvider:
         )
 
 
-TEST_MANAGEMENT_TOKEN = "test-only-management-token-32-bytes"
-
-
 @pytest.fixture
 def runtime_database_url() -> str:
     url = os.environ.get("VALOR_TEST_DATABASE_URL")
@@ -64,6 +62,9 @@ async def clean_runtime_tables(runtime_database_url: str) -> AsyncIterator[None]
     engine = create_async_engine(runtime_database_url)
     async with engine.begin() as connection:
         await connection.execute(text("DELETE FROM management_audit_records"))
+        await connection.execute(text("DELETE FROM management_credentials"))
+        await connection.execute(text("DELETE FROM management_principal_tenant_scopes"))
+        await connection.execute(text("DELETE FROM management_principals"))
         await connection.execute(text("DELETE FROM invocations"))
         await connection.execute(text("DELETE FROM policy_decisions"))
         await connection.execute(text("DELETE FROM agent_model_permissions"))
@@ -73,6 +74,9 @@ async def clean_runtime_tables(runtime_database_url: str) -> AsyncIterator[None]
     yield
     async with engine.begin() as connection:
         await connection.execute(text("DELETE FROM management_audit_records"))
+        await connection.execute(text("DELETE FROM management_credentials"))
+        await connection.execute(text("DELETE FROM management_principal_tenant_scopes"))
+        await connection.execute(text("DELETE FROM management_principals"))
         await connection.execute(text("DELETE FROM invocations"))
         await connection.execute(text("DELETE FROM policy_decisions"))
         await connection.execute(text("DELETE FROM agent_model_permissions"))
@@ -95,16 +99,13 @@ def runtime_client(
     settings = Settings(
         database=DatabaseSettings(url=runtime_database_url),
         security=SecuritySettings(
-            management_principal_id="test-management",
-            management_token=TEST_MANAGEMENT_TOKEN,
-            management_tenant_ids=frozenset(),
+            management_bootstrap_token=BOOTSTRAP_TOKEN,
+            management_credential_pepper=PEPPER,
         ),
         runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )
-    with TestClient(
-        create_app(settings, runtime_provider=runtime_provider),
-        headers={"Authorization": f"Bearer {TEST_MANAGEMENT_TOKEN}"},
-    ) as client:
+    with TestClient(create_app(settings, runtime_provider=runtime_provider)) as client:
+        bootstrap_management(client)
         yield client
 
 
@@ -116,9 +117,8 @@ def unauthenticated_runtime_client(
     settings = Settings(
         database=DatabaseSettings(url=runtime_database_url),
         security=SecuritySettings(
-            management_principal_id="test-management",
-            management_token=TEST_MANAGEMENT_TOKEN,
-            management_tenant_ids=frozenset(),
+            management_bootstrap_token=BOOTSTRAP_TOKEN,
+            management_credential_pepper=PEPPER,
         ),
         runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )

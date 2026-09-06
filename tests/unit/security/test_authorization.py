@@ -9,9 +9,11 @@ from valor.security.application.principal import AuthenticatedPrincipal, Princip
 
 def principal(*tenant_ids: UUID) -> AuthenticatedPrincipal:
     return AuthenticatedPrincipal(
-        principal_id="management-operator",
+        principal_id=UUID("11111111-1111-4111-8111-111111111111"),
+        credential_id=UUID("22222222-2222-4222-8222-222222222222"),
         principal_kind=PrincipalKind.MANAGEMENT,
         authorized_tenant_ids=frozenset(tenant_ids),
+        can_manage_principals=False,
     )
 
 

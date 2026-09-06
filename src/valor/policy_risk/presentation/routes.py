@@ -70,7 +70,7 @@ async def set_permission(
             AgentId(payload.agent_id),
             ModelId(payload.model_id),
             payload.effect,
-            principal.principal_id,
+            str(principal.principal_id),
         )
     )
     return AgentModelPermissionResponse.from_domain(permission)

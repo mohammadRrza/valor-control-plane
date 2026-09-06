@@ -97,11 +97,17 @@ class TenantBudgetSettings(BaseModel):
 
 
 class SecuritySettings(BaseModel):
-    management_principal_id: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
-    ]
-    management_token: SecretStr = Field(min_length=32)
-    management_tenant_ids: frozenset[UUID]
+    management_bootstrap_token: SecretStr = Field(min_length=32)
+    management_credential_pepper: SecretStr = Field(min_length=32)
+
+    @model_validator(mode="after")
+    def require_independent_secrets(self) -> "SecuritySettings":
+        if (
+            self.management_bootstrap_token.get_secret_value()
+            == self.management_credential_pepper.get_secret_value()
+        ):
+            raise ValueError("Management bootstrap token and credential pepper must be distinct.")
+        return self
 
 
 class RuntimePrincipalSettings(BaseModel):
@@ -161,13 +167,13 @@ class Settings(BaseSettings):
     runtime_auth: RuntimeAuthenticationSettings
 
     @model_validator(mode="after")
-    def separate_management_and_runtime_credentials(self) -> "Settings":
-        management = self.security.management_token.get_secret_value()
+    def separate_bootstrap_and_runtime_credentials(self) -> "Settings":
+        bootstrap = self.security.management_bootstrap_token.get_secret_value()
         if any(
-            principal.credential.get_secret_value() == management
+            principal.credential.get_secret_value() == bootstrap
             for principal in self.runtime_auth.principals
         ):
-            raise ValueError("Management and runtime credentials must be distinct.")
+            raise ValueError("Management bootstrap and runtime credentials must be distinct.")
         return self
 
 

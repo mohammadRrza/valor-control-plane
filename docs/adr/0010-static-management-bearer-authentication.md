@@ -1,6 +1,6 @@
 # ADR-0010: Static bearer authentication for the initial management plane
 
-**Status:** Accepted
+**Status:** Superseded by ADR-0019
 
 ## Context
 

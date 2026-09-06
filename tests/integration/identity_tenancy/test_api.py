@@ -1,9 +1,9 @@
-from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from tests.integration.management_helpers import set_management_scopes
 
 
 @pytest.mark.integration
@@ -15,8 +15,7 @@ def test_create_then_get_tenant(postgres_client: TestClient) -> None:
     assert created.headers["location"] == f"/api/v1/tenants/{body['id']}"
 
     tenant_id = UUID(body["id"])
-    app = cast(FastAPI, postgres_client.app)
-    app.state.settings.security.management_tenant_ids = frozenset({tenant_id})
+    set_management_scopes(postgres_client, {tenant_id})
 
     retrieved = postgres_client.get(f"/api/v1/tenants/{body['id']}")
     assert retrieved.status_code == 200

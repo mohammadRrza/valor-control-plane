@@ -1,6 +1,5 @@
-"""Single FastAPI dependency for management bearer authentication."""
+"""Persisted Management bearer authentication dependency."""
 
-from secrets import compare_digest
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -12,21 +11,23 @@ from valor.security.application.principal import AuthenticatedPrincipal, Princip
 bearer = HTTPBearer(auto_error=False)
 
 
-def require_management_principal(
+async def require_management_principal(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
 ) -> AuthenticatedPrincipal:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise ManagementAuthenticationFailed
 
-    security = request.app.state.settings.security
-    supplied = credentials.credentials.encode("utf-8")
-    expected = security.management_token.get_secret_value().encode("utf-8")
-    if not compare_digest(supplied, expected):
+    identity = await request.app.state.management_authenticator.authenticate(
+        credentials.credentials
+    )
+    if identity is None:
         raise ManagementAuthenticationFailed
 
     return AuthenticatedPrincipal(
-        principal_id=security.management_principal_id,
+        principal_id=identity.principal_id,
+        credential_id=identity.credential_id,
         principal_kind=PrincipalKind.MANAGEMENT,
-        authorized_tenant_ids=security.management_tenant_ids,
+        authorized_tenant_ids=identity.authorized_tenant_ids,
+        can_manage_principals=identity.can_manage_principals,
     )

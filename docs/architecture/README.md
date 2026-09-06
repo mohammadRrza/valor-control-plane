@@ -61,6 +61,22 @@ Tenant-scoped, and bounded to an aware `[start, end)` range of at most 31 days a
 No-op PUTs remain auditable with equal before/after fingerprints. Failed attempts, static budget
 configuration edits, WORM storage, export, retention, and SIEM integration are not implemented.
 
+Phase 4.1 adds `management_identity` as the owner of durable Management actor identity and bearer
+credential lifecycle. Principal UUIDs remain stable across credentials; exact Tenant scopes are
+loaded on every authentication and empty means no Tenant access. Credential UUIDs provide indexed
+lookup while high-entropy secrets are verified using a peppered HMAC-SHA256 digest. The secret and
+pepper never enter persistence. One explicit global principal-management capability authorizes
+creation, scope replacement, issuance, revocation, and terminal disablement without introducing a
+role system.
+
+The first Principal and credential share one transaction serialized by a PostgreSQL advisory lock.
+Once any Principal exists, bootstrap authentication is permanently disabled. Lifecycle mutations
+and their fingerprint-only audit records share the Management identity UoW; bootstrap itself is not
+audited because no persisted actor exists yet. Identity lifecycle evidence is global with a null
+audit Tenant correlation; its Principal fingerprint includes sorted exact scopes, while existing
+Tenant-owned permission evidence remains non-null and Tenant-queryable. A recoverability check prevents disabling the last
+active manager or revoking its last usable credential. Runtime identity remains unrelated.
+
 These are domain boundaries, not services. Identity & Tenancy supports Tenant creation/retrieval; AI Asset Registry supports Agent and Model registration/retrieval; Runtime Gateway supports one synchronous OpenAI Invocation; Policy & Risk supports one exact Agent-to-Model permission and decision history. Each context owns its architectural layers. Cross-context access uses explicit contracts rather than imports into another context's internals.
 
 ### Tenant slice decisions
@@ -214,11 +230,14 @@ Default deny materially improves runtime safety. Policy management requires the 
 
 ### Management authentication boundary
 
-Tenant, Agent, Model, and Policy routes are management-plane APIs and share one FastAPI authentication dependency. It validates an environment-supplied bearer credential in constant time and produces a framework-independent `AuthenticatedPrincipal` containing the stable configured principal ID, `management` kind, and a finite immutable set of manageable Tenant UUIDs. Missing or invalid credentials receive the same sanitized 401 Problem Details response and `WWW-Authenticate: Bearer`.
+Tenant, Agent, Model, Policy, reporting, and audit routes share one FastAPI authentication dependency. It parses the persisted Management credential ID, loads its Principal and current Tenant scopes, validates active/revocation/expiry state, and compares the peppered verifier in constant time. Missing, malformed, unknown, wrong, expired, revoked, or disabled credentials receive the same sanitized 401 Problem Details response and `WWW-Authenticate: Bearer`.
 
-The credential is a `SecretStr`, is unwrapped only during validation, and is never an audit identity, persistence value, response field, or logging field. Authentication proves possession; a separate framework-independent rule authorizes exact Tenant UUID membership. Empty scope grants nothing, malformed or missing scope fails startup, and no wildcard/global authority exists.
+Bearer secrets are returned only from issuance/bootstrap responses and are never audit identities,
+stored values, subsequent response fields, or logging fields. Authentication proves possession; a
+separate framework-independent rule authorizes exact Tenant UUID membership. Empty scope grants
+nothing and no wildcard Tenant authority exists.
 
-Tenant GET authorizes its path identity before loading. Agent, Model, and Permission creation/mutation authorizes the supplied Tenant before business work; retrieval authorizes the aggregate's owning Tenant before presentation. Denials reuse each resource's existing 404 response, preventing cross-Tenant enumeration. Tenant creation alone remains an authenticated provisioning exception: it creates no grant, so configuration and application restart are required before the generated Tenant can be managed.
+Tenant GET authorizes its path identity before loading. Agent, Model, and Permission creation/mutation authorizes the supplied Tenant before business work; retrieval authorizes the aggregate's owning Tenant before presentation. Denials reuse each resource's existing 404 response, preventing cross-Tenant enumeration. Tenant creation alone remains an authenticated provisioning exception: it creates no grant, so the manager must explicitly replace its persisted Tenant scopes before the generated Tenant can be managed.
 
 Health endpoints remain public. Runtime endpoints use a separate bearer dependency and never
 interpret the management credential as Agent identity; runtime credentials likewise fail

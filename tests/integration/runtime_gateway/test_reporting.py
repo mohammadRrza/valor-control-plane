@@ -1,14 +1,13 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, async_sessionmaker, create_async_engine
 
+from tests.integration.management_helpers import set_management_scopes
 from valor.runtime_gateway.domain.identity import TenantId
 from valor.runtime_gateway.infrastructure.cost_budget import PostgresTenantEstimatedCostReader
 from valor.runtime_gateway.infrastructure.reporting import PostgresTenantRuntimeReportReader
@@ -223,9 +222,7 @@ async def test_postgres_report_aggregates_exact_tenant_half_open_evidence(
     assert report.top_agents_by_estimated_cost[0].cost_unavailable_invocations == 1
     assert report.top_models_by_estimated_cost[0].invocation_count == 8
 
-    cast(FastAPI, runtime_client.app).state.settings.security.management_tenant_ids = frozenset(
-        {TENANT_A}
-    )
+    set_management_scopes(runtime_client, {TENANT_A})
     response = runtime_client.get(
         f"/api/v1/tenants/{TENANT_A}/runtime-report",
         params={"start": START.isoformat(), "end": END.isoformat()},
@@ -359,9 +356,7 @@ async def test_postgres_report_returns_deterministic_bounded_cost_breakdowns(
     assert zero_agent.cost_attributed_invocations == 1
     assert zero_agent.cost_unavailable_invocations == 0
 
-    cast(FastAPI, runtime_client.app).state.settings.security.management_tenant_ids = frozenset(
-        {TENANT_A}
-    )
+    set_management_scopes(runtime_client, {TENANT_A})
     response = runtime_client.get(
         f"/api/v1/tenants/{TENANT_A}/runtime-report",
         params={"start": START.isoformat(), "end": END.isoformat()},

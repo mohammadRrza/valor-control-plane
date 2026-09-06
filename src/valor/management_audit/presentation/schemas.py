@@ -9,7 +9,7 @@ from valor.management_audit.domain.audit_record import ManagementAuditRecord
 class ManagementAuditRecordResponse(BaseModel):
     audit_id: UUID
     principal_id: str
-    tenant_id: UUID
+    tenant_id: UUID | None
     action: str
     resource_type: str
     resource_id: UUID

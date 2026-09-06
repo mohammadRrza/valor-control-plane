@@ -49,16 +49,20 @@ though the current model treats them as plain text.
 
 Implemented controls:
 
-- constant-time validation of a static management bearer credential;
-- one stable, non-secret management principal identity;
-- explicit finite Tenant UUID scopes with empty scope failing closed;
+- persisted independent Management Principal and Credential identities;
+- indexed credential lookup and constant-time peppered HMAC-SHA256 verification;
+- one-time secret return, permanent credential revocation, optional expiry, and terminal Principal disablement;
+- explicit persisted Tenant UUID scopes with empty scope failing closed;
+- one-time first-Principal bootstrap serialized against concurrent attempts;
+- last-recoverable-manager protection;
 - non-disclosing 404 responses for cross-Tenant resources;
 - exact Tenant ownership enforcement for Agent, Model, and Policy management.
 
 Tenant creation is an authenticated provisioning exception. It does not automatically grant scope.
 
-Residual threats include bearer theft and replay, one shared principal, lack of credential rotation,
-lack of individual accountability, and lack of a policy-change audit trail.
+Residual threats include bearer theft and replay, no MFA or external identity proof, compromise of
+both database and pepper, bootstrap-secret exposure before initialization, no credential-use audit,
+no automatic rotation, and no hidden break-glass recovery.
 
 ### Runtime client to Runtime Gateway
 
@@ -146,10 +150,10 @@ cryptographic evidence chaining. Credentials and full request payloads are never
 | Category | Threat | Current control | Residual severity | Next control |
 |---|---|---|---|---|
 | Spoofing | Caller claims another Agent/Tenant at runtime | Identity derives from a credential bound to one Tenant/Agent | Mitigated; credential theft remains High | Rotation/revocation and workload identity |
-| Spoofing | Management principal impersonation | Static bearer authentication, constant-time comparison | High | Rotation and multiple federated principals |
+| Spoofing | Management principal impersonation | Independent persisted credentials, peppered verifier, revocation/expiry/disable checks | Medium; bearer replay remains | OIDC/MFA or workload federation when justified |
 | Tampering | Unauthorized policy mutation | Management auth, exact Tenant scope, DB constraints | Medium | Management mutation audit/history |
 | Tampering | Direct Invocation/Decision changes | DB access boundary and constraints | High if DB compromised | Restricted DB roles and tamper-evident evidence |
-| Repudiation | Operator denies changing a permission | Successful PUT stores principal/resource/time and state fingerprints atomically | Mitigated; shared credentials and DB tampering remain Medium | Individual managed identities and protected audit storage |
+| Repudiation | Operator denies changing a permission | Persisted stable Principal UUID plus atomic actor/resource/time fingerprints | Mitigated; DB tampering and identity proof remain Medium | Protected audit storage and federated identity |
 | Information disclosure | Cross-principal Runtime GET reveals prompt/response | Exact principal/Tenant/Agent correlation and non-disclosing 404 | Mitigated; stored-data risk remains High/Medium | Retention, redaction, encryption policy |
 | Information disclosure | Database/backup reveals prompt/response | Infrastructure access boundary | High/Medium | Retention, redaction, classification, encryption policy |
 | Denial of service | Runtime exhausts connections/provider capacity | Provider timeout | High/Medium | Identity-aware limits and concurrency controls |
@@ -173,7 +177,7 @@ runtime identity risk.
 
 Implemented strengths:
 
-- management authentication and explicit Tenant-scoped authorization;
+- persisted Management Principals, independent revocable credentials, and exact Tenant scopes;
 - separate Runtime authentication bound to an exact Tenant and Agent;
 - non-disclosing Runtime read isolation by principal, Tenant, and Agent;
 - Tenant ownership and non-disclosing cross-Tenant management failures;
@@ -181,23 +185,24 @@ Implemented strengths:
 - persisted PolicyDecision and Invocation records;
 - persisted duration, normalized usage attribution, and safe provider response correlation;
 - provider-secret isolation and sanitized upstream failures;
-- PostgreSQL integrity constraints and explicit transactions.
+- PostgreSQL integrity constraints and explicit transactions;
 - atomic actor-correlated audit evidence for successful Agent-to-Model permission changes.
 
 Material gaps:
 
 1. Static runtime credential lifecycle, theft, replay, rotation, and revocation — High.
 2. Sensitive Invocation data retention/redaction policy — High/Medium.
-3. Concurrency-safe reservations, request-rate limits, and tenant budgets — Medium.
-4. Individual Management identity lifecycle, failed-attempt audit, and protected evidence storage — Medium.
+3. Management bearer replay, external identity proof, MFA, and recovery procedures — Medium.
+4. Concurrency-safe reservations and request-rate limits — Medium.
+5. Failed-attempt audit and protected evidence storage — Medium.
 
 ## Recommended sequence
 
 ```text
 Managed runtime credential issuance/rotation/revocation
-  → Per-principal rate/budget controls using persisted usage facts
+  → Concurrency-safe reservations and request-rate controls
   → Sensitive-data retention and redaction
-  → Management mutation audit
+  → Protected Management audit retention
   → Enterprise identity/OIDC when justified
 ```
 

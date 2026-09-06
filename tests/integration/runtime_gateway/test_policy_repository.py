@@ -1,12 +1,11 @@
 from datetime import UTC, datetime, timedelta
-from typing import cast
 from uuid import UUID
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from tests.integration.management_helpers import grant_management_scopes
 from valor.policy_risk.application.errors import PolicyAgentNotAvailable
 from valor.policy_risk.domain.identity import AgentId, ModelId, PermissionId, TenantId
 from valor.policy_risk.domain.policy import AgentModelPermission, PolicyEffect
@@ -18,8 +17,7 @@ NOW = datetime(2026, 3, 4, 5, 6, tzinfo=UTC)
 def create_references(client: TestClient) -> tuple[UUID, UUID, UUID]:
     tenant = client.post("/api/v1/tenants", json={"name": "Policy Repo Tenant"}).json()["id"]
     tenant_id = UUID(tenant)
-    security = cast(FastAPI, client.app).state.settings.security
-    security.management_tenant_ids = frozenset({tenant_id})
+    grant_management_scopes(client, {tenant_id})
     agent = client.post(
         "/api/v1/agents", json={"tenant_id": tenant, "name": "Policy Repo Agent"}
     ).json()["id"]

@@ -6,10 +6,17 @@ from uuid import UUID
 
 class ManagementAuditAction(StrEnum):
     AGENT_MODEL_PERMISSION_SET = "agent_model_permission_set"
+    MANAGEMENT_PRINCIPAL_CREATED = "management_principal_created"
+    MANAGEMENT_CREDENTIAL_ISSUED = "management_credential_issued"
+    MANAGEMENT_CREDENTIAL_REVOKED = "management_credential_revoked"
+    MANAGEMENT_PRINCIPAL_DISABLED = "management_principal_disabled"
+    MANAGEMENT_PRINCIPAL_SCOPES_SET = "management_principal_scopes_set"
 
 
 class ManagementAuditResourceType(StrEnum):
     AGENT_MODEL_PERMISSION = "agent_model_permission"
+    MANAGEMENT_PRINCIPAL = "management_principal"
+    MANAGEMENT_CREDENTIAL = "management_credential"
 
 
 class ManagementAuditOutcome(StrEnum):
@@ -21,7 +28,7 @@ class ManagementAuditOutcome(StrEnum):
 class ManagementAuditRecord:
     audit_id: UUID
     principal_id: str
-    tenant_id: UUID
+    tenant_id: UUID | None
     action: ManagementAuditAction
     resource_type: ManagementAuditResourceType
     resource_id: UUID

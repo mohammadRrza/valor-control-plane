@@ -11,10 +11,14 @@ class ManagementAuditRecordRow(SqlAlchemyBase):
     __tablename__ = "management_audit_records"
     __table_args__ = (
         CheckConstraint(
-            "action IN ('agent_model_permission_set')", name="ck_management_audit_action"
+            "action IN ('agent_model_permission_set', 'management_principal_created', "
+            "'management_credential_issued', 'management_credential_revoked', "
+            "'management_principal_disabled', 'management_principal_scopes_set')",
+            name="ck_management_audit_action",
         ),
         CheckConstraint(
-            "resource_type IN ('agent_model_permission')",
+            "resource_type IN ('agent_model_permission', 'management_principal', "
+            "'management_credential')",
             name="ck_management_audit_resource_type",
         ),
         CheckConstraint("outcome IN ('succeeded', 'failed')", name="ck_management_audit_outcome"),
@@ -35,8 +39,8 @@ class ManagementAuditRecordRow(SqlAlchemyBase):
 
     audit_id: Mapped[UUID] = mapped_column(primary_key=True)
     principal_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey("tenants.id", name="fk_management_audit_tenant_id_tenants"), nullable=False
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("tenants.id", name="fk_management_audit_tenant_id_tenants"), nullable=True
     )
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(64), nullable=False)

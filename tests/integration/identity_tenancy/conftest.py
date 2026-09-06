@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from tests.integration.management_helpers import BOOTSTRAP_TOKEN, PEPPER, bootstrap_management
 from valor.bootstrap.application import create_app
 from valor.bootstrap.settings import (
     DatabaseSettings,
@@ -13,8 +14,6 @@ from valor.bootstrap.settings import (
     SecuritySettings,
     Settings,
 )
-
-TEST_MANAGEMENT_TOKEN = "test-only-management-token-32-bytes"
 
 
 @pytest.fixture
@@ -32,6 +31,10 @@ async def clean_tenants(tenant_database_url: str) -> AsyncIterator[None]:
         await connection.execute(text("DELETE FROM invocations"))
         await connection.execute(text("DELETE FROM policy_decisions"))
         await connection.execute(text("DELETE FROM agent_model_permissions"))
+        await connection.execute(text("DELETE FROM management_audit_records"))
+        await connection.execute(text("DELETE FROM management_credentials"))
+        await connection.execute(text("DELETE FROM management_principal_tenant_scopes"))
+        await connection.execute(text("DELETE FROM management_principals"))
         await connection.execute(text("DELETE FROM models"))
         await connection.execute(text("DELETE FROM agents"))
         await connection.execute(text("DELETE FROM tenants"))
@@ -40,6 +43,10 @@ async def clean_tenants(tenant_database_url: str) -> AsyncIterator[None]:
         await connection.execute(text("DELETE FROM invocations"))
         await connection.execute(text("DELETE FROM policy_decisions"))
         await connection.execute(text("DELETE FROM agent_model_permissions"))
+        await connection.execute(text("DELETE FROM management_audit_records"))
+        await connection.execute(text("DELETE FROM management_credentials"))
+        await connection.execute(text("DELETE FROM management_principal_tenant_scopes"))
+        await connection.execute(text("DELETE FROM management_principals"))
         await connection.execute(text("DELETE FROM models"))
         await connection.execute(text("DELETE FROM agents"))
         await connection.execute(text("DELETE FROM tenants"))
@@ -51,14 +58,11 @@ def postgres_client(tenant_database_url: str) -> Iterator[TestClient]:
     settings = Settings(
         database=DatabaseSettings(url=tenant_database_url),
         security=SecuritySettings(
-            management_principal_id="test-management",
-            management_token=TEST_MANAGEMENT_TOKEN,
-            management_tenant_ids=frozenset(),
+            management_bootstrap_token=BOOTSTRAP_TOKEN,
+            management_credential_pepper=PEPPER,
         ),
         runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )
-    with TestClient(
-        create_app(settings),
-        headers={"Authorization": f"Bearer {TEST_MANAGEMENT_TOKEN}"},
-    ) as client:
+    with TestClient(create_app(settings)) as client:
+        bootstrap_management(client)
         yield client

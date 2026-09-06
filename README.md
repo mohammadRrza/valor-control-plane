@@ -8,7 +8,7 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 **Current phase: Phase 4 — Management governance evidence (in progress).**
 
-Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; static management authentication and Tenant authorization; separate static Runtime Principal authentication with Invocation read isolation; persisted Invocation duration, normalized provider usage, safe provider response correlation, immutable estimated-cost snapshots; bounded Tenant-scoped Runtime usage/cost reporting; and sequential Tenant daily estimated-cost budget enforcement.
+Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; persisted Management Principals with independent revocable credentials and Tenant scopes; separate static Runtime Principal authentication with Invocation read isolation; persisted Invocation duration, normalized provider usage, safe provider response correlation, immutable estimated-cost snapshots; bounded Tenant-scoped Runtime usage/cost reporting; and sequential Tenant daily estimated-cost budget enforcement.
 
 Successful Agent-to-Model permission PUTs append actor-correlated, fingerprint-only Management
 audit evidence in the same PostgreSQL transaction. Static Tenant budget file changes remain outside
@@ -38,8 +38,8 @@ Prerequisites: Python 3.13, [uv](https://docs.astral.sh/uv/), and optionally Doc
 
 ```bash
 cp .env.example .env
-# Supply a stable management principal ID, a long random token, and an explicit
-# JSON array of manageable Tenant UUIDs. An empty array grants no Tenant access.
+# Supply independent long random bootstrap-token and credential-pepper values.
+# The bootstrap token works only while no persisted Management Principal exists.
 # After registering Agents, configure distinct runtime principals as a JSON array;
 # each entry binds identity and credential plus usage_limit and per_invocation_allowance.
 # Replace every example credential before any non-local use.
@@ -62,7 +62,7 @@ make docker-up         # API + PostgreSQL
 make docker-down
 ```
 
-The API listens on port 8000. Operational endpoints are `/health/live` and `/health/ready` and remain public. Send the management bearer credential to Tenant, Agent, Model, and Policy routes; existing-Tenant operations also require configured Tenant scope. Runtime routes require a distinct Runtime Principal bearer credential. Management and runtime credentials are mutually rejected.
+The API listens on port 8000. Operational endpoints are `/health/live` and `/health/ready` and remain public. Bootstrap the first persisted Management Principal once, then send its one-time-returned bearer credential to Management routes. Existing-Tenant operations require persisted Tenant scope. Runtime routes require a distinct Runtime Principal bearer credential; the two credential families are mutually rejected.
 
 ```text
 POST /api/v1/tenants
@@ -76,6 +76,13 @@ GET  /api/v1/runtime/invocations/{invocation_id}
 PUT  /api/v1/policies/agent-model-permissions
 GET  /api/v1/policies/agent-model-permissions/{permission_id}
 GET  /api/v1/tenants/{tenant_id}/audit-records?start=...&end=...&limit=50
+POST /api/v1/management/bootstrap
+POST /api/v1/management/principals
+GET  /api/v1/management/principals/{principal_id}
+PUT  /api/v1/management/principals/{principal_id}/tenant-scopes
+POST /api/v1/management/principals/{principal_id}/credentials
+POST /api/v1/management/principals/{principal_id}/credentials/{credential_id}/revoke
+POST /api/v1/management/principals/{principal_id}/disable
 ```
 
 ## Repository layout
@@ -110,6 +117,11 @@ src/valor/
     application/    bounded Tenant audit query and reader port
     infrastructure/ append-only persistence and PostgreSQL reader
     presentation/   Tenant-scoped audit records route and errors
+  management_identity/
+    domain/         persisted principal and credential lifecycle models
+    application/    bootstrap, authentication, lifecycle, and atomic audit orchestration
+    infrastructure/ SQLAlchemy repositories, UoW, and bootstrap serialization
+    presentation/   bootstrap and principal-management HTTP boundary
   security/
     application/    authenticated principal and explicit Tenant authorization rule
     presentation/   bearer parsing, constant-time validation, and HTTP error mapping
@@ -124,9 +136,21 @@ docs/              architecture and decisions
 
 Never commit `.env`, secrets, tokens, credentials, or sensitive payloads. Logs must use allow-listed metadata and must not contain prompts or credentials. Treat migrations as reviewed production changes: provide reversible downgrades where safe and never edit an applied revision. Contributions should include proportionate tests, updated documentation, and pass every `make lint`, `make typecheck`, and `make test` check. Use Conventional Commit subjects (for example, `feat(identity): register tenant`) without adding commit tooling solely to enforce formatting.
 
-**Security status:** Management endpoints require a static management bearer credential and exact configured Tenant scope. Runtime endpoints require separate static credentials, each bound to exactly one Tenant and Agent. POST identity is derived from that binding; GET is isolated by runtime principal, Tenant, and Agent. Cross-boundary and cross-principal credentials are rejected. No bearer credential is persisted, logged, or returned.
+**Security status:** Management endpoints authenticate independently persisted Management credentials and authorize exact persisted Tenant scopes. Bearer secrets are returned only at issuance; PostgreSQL stores an HMAC-SHA256 verifier keyed by a deployment pepper. Credentials can overlap for rotation and be permanently revoked, and disabling a Principal invalidates all its credentials. Runtime endpoints retain separate static credentials bound to one Tenant and Agent. Cross-boundary credentials are rejected.
 
-Tenant creation is an authenticated provisioning exception because its generated UUID cannot be scoped before creation. Creation does not grant access. Add the returned UUID to `VALOR_SECURITY__MANAGEMENT_TENANT_IDS` and restart the application before retrieving the Tenant or managing its Agents, Models, and permissions. The value uses JSON-array syntax, for example `["00000000-0000-4000-8000-000000000001"]`.
+Bootstrap the first manager with `POST /api/v1/management/bootstrap` using
+`VALOR_SECURITY__MANAGEMENT_BOOTSTRAP_TOKEN`. The response returns its first bearer token exactly
+once. The endpoint becomes invalid permanently after the first Principal commits, even if the
+environment token remains configured. Tenant creation remains an authenticated provisioning
+exception; use the exact-replacement Tenant-scope endpoint before managing the new Tenant.
+
+Rotation means issuing a replacement credential, moving the client, and then revoking the old
+credential. Keep `VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER` stable and secret: changing or
+losing it invalidates every persisted Management credential. There is no hidden bootstrap reset or
+break-glass backdoor; recovery depends on protected database backups and operator procedures.
+This is a clean authentication cutover: the former static Management token is not an ordinary
+fallback. Audit rows written before migration 0015 retain their legacy actor strings unchanged;
+new governance evidence uses the persisted Principal UUID string.
 
 Runtime authentication does not replace authorization: an explicit ALLOW for the authenticated Tenant/Agent and requested Model remains required. Static runtime configuration has no issuance, rotation, revocation, expiry, rate limits, or workload federation, so this remains an interim boundary requiring TLS and secure secret injection.
 

@@ -28,9 +28,8 @@ jobs:
     env:
       VALOR_DATABASE__URL: postgresql+psycopg://valor:test-only@localhost:5432/valor_test
       VALOR_TEST_DATABASE_URL: postgresql+psycopg://valor:test-only@localhost:5432/valor_test
-      VALOR_SECURITY__MANAGEMENT_PRINCIPAL_ID: ci-management
-      VALOR_SECURITY__MANAGEMENT_TOKEN: test-only-ci-management-token-32-bytes
-      VALOR_SECURITY__MANAGEMENT_TENANT_IDS: '[]'
+      VALOR_SECURITY__MANAGEMENT_BOOTSTRAP_TOKEN: test-only-ci-management-bootstrap-token-32-bytes
+      VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER: test-only-ci-management-pepper-value-32-bytes
       VALOR_RUNTIME_AUTH__PRINCIPALS: '[]'
       VALOR_PRICING__ENTRIES: '[]'
       VALOR_TENANT_BUDGETS__ENTRIES: '[]'

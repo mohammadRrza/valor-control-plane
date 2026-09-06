@@ -1,0 +1,1 @@
+"""Management identity persistence adapters."""

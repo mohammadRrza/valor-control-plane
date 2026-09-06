@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from tests.integration.management_helpers import grant_management_scopes, set_management_scopes
 from valor.policy_risk.application.set_permission import (
     SetAgentModelPermissionCommand,
     SetAgentModelPermissionHandler,
@@ -19,10 +20,7 @@ from valor.policy_risk.infrastructure.unit_of_work import SqlAlchemyPolicyUnitOf
 
 def _resources(client: TestClient, suffix: str) -> tuple[UUID, UUID, UUID]:
     tenant_id = UUID(client.post("/api/v1/tenants", json={"name": f"Audit {suffix}"}).json()["id"])
-    settings = cast(FastAPI, client.app).state.settings
-    settings.security.management_tenant_ids = frozenset(
-        {*settings.security.management_tenant_ids, tenant_id}
-    )
+    grant_management_scopes(client, {tenant_id})
     agent_id = UUID(
         client.post(
             "/api/v1/agents", json={"tenant_id": str(tenant_id), "name": f"Agent {suffix}"}
@@ -84,7 +82,8 @@ def test_permission_create_update_and_noop_append_fingerprints(
     assert created["after_fingerprint"] != updated["after_fingerprint"]
     assert updated["before_fingerprint"] == created["after_fingerprint"]
     assert newest["before_fingerprint"] == newest["after_fingerprint"]
-    assert newest["principal_id"] == "test-management"
+    app = cast(FastAPI, runtime_client.app)
+    assert newest["principal_id"] == str(app.state.test_management_principal_id)
     assert newest["resource_id"] == permission["id"]
     assert "token" not in str(records).lower()
 
@@ -94,8 +93,7 @@ def test_audit_read_is_tenant_isolated_and_time_bounded(runtime_client: TestClie
     tenant_b, agent_b, model_b = _resources(runtime_client, "tenant-b")
     _put(runtime_client, tenant_a, agent_a, model_a, "allow")
     _put(runtime_client, tenant_b, agent_b, model_b, "deny")
-    settings = cast(FastAPI, runtime_client.app).state.settings
-    settings.security.management_tenant_ids = frozenset({tenant_a})
+    set_management_scopes(runtime_client, {tenant_a})
 
     records = _read(runtime_client, tenant_a)
     assert len(records) == 1
