@@ -340,12 +340,15 @@ def test_authentication_evidence_is_secret_free_attributable_and_hourly_bounded(
         }
         for row in response.json()
     )
-    assert len(
-        runtime_client.get(
-            "/api/v1/management/authentication-evidence",
-            params={**params, "limit": 1},
-        ).json()
-    ) == 1
+    assert (
+        len(
+            runtime_client.get(
+                "/api/v1/management/authentication-evidence",
+                params={**params, "limit": 1},
+            ).json()
+        )
+        == 1
+    )
 
     principal_query = dict(params)
     principal_query.pop("credential_id")
