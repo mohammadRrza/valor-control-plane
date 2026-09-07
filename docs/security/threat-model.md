@@ -166,6 +166,13 @@ filtered to one exact Principal and do not create audit events. Residual risks i
 replay, absent MFA/OIDC/proof-of-possession, manual rather than automatic rotation, pepper
 compromise or loss, no protected external audit storage, and static Runtime credentials.
 
+Principal managers can also discover persisted Management actors and identify disabled actors,
+zero-scope actors, actors without usable credentials, and actors holding principal-management
+authority. The bounded response exposes only aggregate scope and credential counts—not Tenant IDs,
+credentials, verifiers, or secrets. This improves operator visibility but is not enterprise IAM:
+human identity proof, OIDC, MFA, automated rotation, break-glass recovery, complete pagination, and
+credential last-use facts remain absent, while database administrators retain broad power.
+
 ## STRIDE-oriented threat register
 
 | Category | Threat | Current control | Residual severity | Next control |

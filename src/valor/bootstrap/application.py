@@ -31,6 +31,9 @@ from valor.management_identity.infrastructure.credential_inventory_reader import
 from valor.management_identity.infrastructure.evidence_reader import (
     PostgresManagementAuthenticationEvidenceReader,
 )
+from valor.management_identity.infrastructure.principal_inventory_reader import (
+    PostgresManagementPrincipalInventoryReader,
+)
 from valor.management_identity.infrastructure.unit_of_work import (
     SqlAlchemyManagementIdentityUnitOfWork,
 )
@@ -94,6 +97,9 @@ def create_app(
         )
         app.state.management_credential_inventory_reader = (
             PostgresManagementCredentialInventoryReader(database.sessions)
+        )
+        app.state.management_principal_inventory_reader = (
+            PostgresManagementPrincipalInventoryReader(database.sessions)
         )
         management_identity_uow_factory = partial(
             SqlAlchemyManagementIdentityUnitOfWork, database.sessions

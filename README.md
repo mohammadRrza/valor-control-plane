@@ -78,6 +78,7 @@ GET  /api/v1/policies/agent-model-permissions/{permission_id}
 GET  /api/v1/tenants/{tenant_id}/audit-records?start=...&end=...&limit=50
 POST /api/v1/management/bootstrap
 POST /api/v1/management/principals
+GET  /api/v1/management/principals?limit=50
 GET  /api/v1/management/principals/{principal_id}
 GET  /api/v1/management/principals/{principal_id}/credentials?limit=50
 PUT  /api/v1/management/principals/{principal_id}/tenant-scopes
@@ -180,6 +181,13 @@ Manual rotation is: list credentials, issue a replacement, securely deploy the o
 secret, verify it authenticates, list again, revoke the old credential, then confirm the old entry
 is revoked/unusable while the replacement remains active. Issuance never implicitly revokes the
 current credential, and inventory reads create no governance audit record.
+
+Principal managers can discover persisted Management actors through the bounded
+`GET /api/v1/management/principals` inventory. It exposes active/disabled state, management
+capability, Tenant-scope count, total credential count, and request-time usable credential count;
+it intentionally excludes Tenant UUID lists and all credential details or secrets. Results are
+ordered by `created_at DESC, principal_id DESC`, capped at 100, and report truncation without
+pagination. A scope count of zero means no Tenant access, never global access.
 
 Runtime authentication does not replace authorization: an explicit ALLOW for the authenticated Tenant/Agent and requested Model remains required. Static runtime configuration has no issuance, rotation, revocation, expiry, rate limits, or workload federation, so this remains an interim boundary requiring TLS and secure secret injection.
 

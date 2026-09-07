@@ -99,6 +99,12 @@ filters by one exact Principal, orders by `created_at DESC, credential_id DESC`,
 clock. The metadata-only model remains separate from authentication evidence, lifecycle
 repositories, and Runtime identity.
 
+Phase 4.5 adds bounded Principal discovery through another narrow read port. PostgreSQL joins two
+pre-aggregated subqueries—one for scopes and one for credentials—to the bounded Principal list,
+avoiding both N+1 reads and scope/credential join multiplication. One application-captured time is
+passed into the query for consistent usable-credential counts. The response exposes counts rather
+than Tenant IDs and does not join audit or authentication-evidence storage.
+
 These are domain boundaries, not services. Identity & Tenancy supports Tenant creation/retrieval; AI Asset Registry supports Agent and Model registration/retrieval; Runtime Gateway supports one synchronous OpenAI Invocation; Policy & Risk supports one exact Agent-to-Model permission and decision history. Each context owns its architectural layers. Cross-context access uses explicit contracts rather than imports into another context's internals.
 
 ### Tenant slice decisions

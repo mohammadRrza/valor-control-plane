@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from valor.management_identity.application.credential_inventory import CredentialInventoryResult
 from valor.management_identity.application.handlers import IssuedCredential
+from valor.management_identity.application.principal_inventory import PrincipalInventoryResult
 from valor.management_identity.domain.authentication_evidence import (
     ManagementAuthenticationEvidence,
 )
@@ -126,6 +127,43 @@ class CredentialInventoryResponse(BaseModel):
                     revoked_at=item.revoked_at,
                     usable=item.usable,
                     state=item.state.value,
+                )
+                for item in value.items
+            ],
+            truncated=value.truncated,
+        )
+
+
+class PrincipalInventoryItemResponse(BaseModel):
+    principal_id: UUID
+    display_name: str
+    created_at: datetime
+    disabled_at: datetime | None
+    state: str
+    can_manage_principals: bool
+    tenant_scope_count: int
+    credential_count: int
+    usable_credential_count: int
+
+
+class PrincipalInventoryResponse(BaseModel):
+    items: list[PrincipalInventoryItemResponse]
+    truncated: bool
+
+    @classmethod
+    def from_result(cls, value: PrincipalInventoryResult) -> "PrincipalInventoryResponse":
+        return cls(
+            items=[
+                PrincipalInventoryItemResponse(
+                    principal_id=item.principal_id,
+                    display_name=item.display_name,
+                    created_at=item.created_at,
+                    disabled_at=item.disabled_at,
+                    state=item.state.value,
+                    can_manage_principals=item.can_manage_principals,
+                    tenant_scope_count=item.tenant_scope_count,
+                    credential_count=item.credential_count,
+                    usable_credential_count=item.usable_credential_count,
                 )
                 for item in value.items
             ],

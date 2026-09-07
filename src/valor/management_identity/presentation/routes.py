@@ -28,6 +28,10 @@ from valor.management_identity.application.handlers import (
     RevokeCredentialCommand,
     SetScopesCommand,
 )
+from valor.management_identity.application.principal_inventory import (
+    ListManagementPrincipalInventoryHandler,
+    ManagementPrincipalInventoryReaderPort,
+)
 from valor.management_identity.presentation.schemas import (
     BootstrapRequest,
     BootstrapResponse,
@@ -37,6 +41,7 @@ from valor.management_identity.presentation.schemas import (
     IssueCredentialRequest,
     IssuedCredentialResponse,
     ManagementAuthenticationEvidenceResponse,
+    PrincipalInventoryResponse,
     PrincipalResponse,
     SetTenantScopesRequest,
 )
@@ -61,6 +66,13 @@ def credential_inventory_reader(request: Request) -> ManagementCredentialInvento
     return cast(
         ManagementCredentialInventoryReaderPort,
         request.app.state.management_credential_inventory_reader,
+    )
+
+
+def principal_inventory_reader(request: Request) -> ManagementPrincipalInventoryReaderPort:
+    return cast(
+        ManagementPrincipalInventoryReaderPort,
+        request.app.state.management_principal_inventory_reader,
     )
 
 
@@ -121,6 +133,18 @@ async def create_principal(
         )
     )
     return PrincipalResponse.from_domain(result)
+
+
+@router.get("/principals", response_model=PrincipalInventoryResponse)
+async def list_principals(
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
+    reader: Annotated[ManagementPrincipalInventoryReaderPort, Depends(principal_inventory_reader)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> PrincipalInventoryResponse:
+    if not principal.can_manage_principals:
+        raise PrincipalManagementDenied
+    result = await ListManagementPrincipalInventoryHandler(reader)(limit)
+    return PrincipalInventoryResponse.from_result(result)
 
 
 @router.get("/principals/{principal_id}", response_model=PrincipalResponse)

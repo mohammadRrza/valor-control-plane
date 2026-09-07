@@ -570,3 +570,102 @@ def test_credential_inventory_supports_safe_manual_rotation(
         assert count == 0
 
     asyncio.run(assert_inventory_read_did_not_audit())
+
+
+@pytest.mark.integration
+def test_principal_inventory_aggregates_without_join_multiplication(
+    runtime_client: TestClient, runtime_database_url: str
+) -> None:
+    tenants = {
+        UUID(runtime_client.post("/api/v1/tenants", json={"name": f"Scope {i}"}).json()["id"])
+        for i in range(3)
+    }
+    principal_id = _create_principal(
+        runtime_client,
+        name="Inventory Target",
+        tenant_ids=tenants,
+        manager=False,
+    )
+    credentials = [_issue(runtime_client, principal_id, f"credential-{i}") for i in range(4)]
+    assert (
+        runtime_client.post(
+            f"/api/v1/management/principals/{principal_id}/credentials/"
+            f"{credentials[0]['credential_id']}/revoke"
+        ).status_code
+        == 200
+    )
+
+    async def expire_at_boundary_and_count_audits() -> int:
+        engine = create_async_engine(runtime_database_url)
+        now = datetime.now(UTC)
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "UPDATE management_credentials SET expires_at = :now "
+                    "WHERE credential_id = :credential_id"
+                ),
+                {"now": now, "credential_id": credentials[1]["credential_id"]},
+            )
+            count = await connection.scalar(text("SELECT count(*) FROM management_audit_records"))
+        await engine.dispose()
+        return int(count or 0)
+
+    audit_count = asyncio.run(expire_at_boundary_and_count_audits())
+    response = runtime_client.get("/api/v1/management/principals")
+    assert response.status_code == 200
+    payload = response.json()
+    target = next(item for item in payload["items"] if item["principal_id"] == str(principal_id))
+    assert target == {
+        "principal_id": str(principal_id),
+        "display_name": "Inventory Target",
+        "created_at": target["created_at"],
+        "disabled_at": None,
+        "state": "active",
+        "can_manage_principals": False,
+        "tenant_scope_count": 3,
+        "credential_count": 4,
+        "usable_credential_count": 2,
+    }
+    assert "tenant_ids" not in target
+    assert not any(
+        forbidden in response.text.lower()
+        for forbidden in ("secret", "bearer", "verifier", "pepper", "authorization")
+    )
+    assert (
+        runtime_client.get("/api/v1/management/principals", params={"limit": 1}).json()["truncated"]
+        is True
+    )
+
+    non_manager_headers = {"Authorization": f"Bearer {credentials[2]['bearer_token']}"}
+    assert (
+        runtime_client.get("/api/v1/management/principals", headers=non_manager_headers).status_code
+        == 404
+    )
+    assert (
+        runtime_client.get(
+            "/api/v1/management/principals", headers={"Authorization": ""}
+        ).status_code
+        == 401
+    )
+    assert (
+        runtime_client.post(f"/api/v1/management/principals/{principal_id}/disable").status_code
+        == 200
+    )
+    disabled = next(
+        item
+        for item in runtime_client.get("/api/v1/management/principals").json()["items"]
+        if item["principal_id"] == str(principal_id)
+    )
+    assert disabled["state"] == "disabled"
+    assert disabled["credential_count"] == 4
+    assert disabled["usable_credential_count"] == 0
+
+    async def audit_count_after_reads() -> int:
+        engine = create_async_engine(runtime_database_url)
+        async with engine.connect() as connection:
+            count = await connection.scalar(text("SELECT count(*) FROM management_audit_records"))
+        await engine.dispose()
+        return int(count or 0)
+
+    # Only the explicit disable mutation adds one record; inventory reads add none.
+    assert asyncio.run(audit_count_after_reads()) == audit_count + 1
