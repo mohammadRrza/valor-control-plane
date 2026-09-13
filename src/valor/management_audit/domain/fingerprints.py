@@ -59,13 +59,21 @@ def management_credential_fingerprint(
 
 
 def runtime_principal_fingerprint(
-    *, principal_id: UUID, tenant_id: UUID, agent_id: UUID, disabled: bool
+    *,
+    principal_id: UUID,
+    tenant_id: UUID,
+    agent_id: UUID,
+    disabled: bool,
+    daily_usage_limit_units: int | None,
+    per_invocation_allowance_units: int | None,
 ) -> str:
     canonical = "\n".join(
         (
             f"principal_id={principal_id}",
             f"tenant_id={tenant_id}",
             f"agent_id={agent_id}",
+            f"daily_usage_limit_units={daily_usage_limit_units or ''}",
+            f"per_invocation_allowance_units={per_invocation_allowance_units or ''}",
             f"disabled={str(disabled).lower()}",
         )
     )

@@ -493,6 +493,12 @@ def test_runtime_principals_can_only_read_their_own_invocations(
         ).status_code
         == 404
     )
+    allowed_b = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_b),
+        headers=runtime_headers(agent_b),
+    )
+    assert allowed_b.status_code == 201
     assert (
         runtime_client.get(
             f"/api/v1/runtime/invocations/{invocation_a_id}",
@@ -900,12 +906,42 @@ def test_daily_usage_limit_sequence_and_principal_isolation(
         ).status_code
         == 404
     )
-    allowed_b = runtime_client.post(
-        "/api/v1/runtime/invocations",
-        json=invocation_payload(model_b),
-        headers=runtime_headers(agent_b),
+
+
+@pytest.mark.integration
+def test_persisted_usage_limits_do_not_replace_live_static_authority(
+    runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
+    configure_runtime_principal(runtime_client, tenant_id, agent_id, usage_limit=1, allowance=1)
+    persisted = runtime_client.post(
+        "/api/v1/management/runtime-principals",
+        json={
+            "tenant_id": str(tenant_id),
+            "agent_id": str(agent_id),
+            "daily_usage_limit_units": 1_000_000,
+            "per_invocation_allowance_units": 100_000,
+        },
     )
-    assert allowed_b.status_code == 201
+    assert persisted.status_code == 201, persisted.text
+
+    first = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+    response = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+
+    assert first.status_code == 201
+    assert response.status_code == 429
+    assert response.json()["title"] == "Runtime Usage Limit Reached"
+    assert len(runtime_provider.calls) == 1
 
 
 @pytest.mark.integration

@@ -14,12 +14,44 @@ class RuntimePrincipal:
     agent_id: UUID
     created_at: datetime
     disabled_at: datetime | None = None
+    daily_usage_limit_units: int | None = None
+    per_invocation_allowance_units: int | None = None
 
     def __post_init__(self) -> None:
         if not _aware(self.created_at) or (
             self.disabled_at is not None and not _aware(self.disabled_at)
         ):
             raise ValueError("principal timestamps must be timezone-aware")
+        daily = self.daily_usage_limit_units
+        allowance = self.per_invocation_allowance_units
+        configured = (daily is not None, allowance is not None)
+        if configured[0] != configured[1]:
+            raise ValueError("runtime usage limits must be configured together")
+        if (
+            daily is not None
+            and allowance is not None
+            and (daily <= 0 or allowance <= 0 or allowance > daily)
+        ):
+            raise ValueError("runtime usage limits are invalid")
+
+    @classmethod
+    def create(
+        cls,
+        principal_id: UUID,
+        tenant_id: UUID,
+        agent_id: UUID,
+        created_at: datetime,
+        daily_usage_limit_units: int,
+        per_invocation_allowance_units: int,
+    ) -> "RuntimePrincipal":
+        return cls(
+            principal_id,
+            tenant_id,
+            agent_id,
+            created_at,
+            daily_usage_limit_units=daily_usage_limit_units,
+            per_invocation_allowance_units=per_invocation_allowance_units,
+        )
 
     @property
     def is_active(self) -> bool:
@@ -28,6 +60,23 @@ class RuntimePrincipal:
     @property
     def state(self) -> str:
         return "active" if self.is_active else "disabled"
+
+    @property
+    def usage_limits_configured(self) -> bool:
+        return self.daily_usage_limit_units is not None
+
+    def initialize_usage_limits(
+        self, daily_usage_limit_units: int, per_invocation_allowance_units: int
+    ) -> "RuntimePrincipal":
+        if not self.is_active:
+            raise ValueError("disabled principals cannot be prepared for cutover")
+        if self.usage_limits_configured:
+            raise ValueError("runtime usage limits are already initialized")
+        return replace(
+            self,
+            daily_usage_limit_units=daily_usage_limit_units,
+            per_invocation_allowance_units=per_invocation_allowance_units,
+        )
 
     def disable(self, at: datetime) -> "RuntimePrincipal":
         if not self.is_active:

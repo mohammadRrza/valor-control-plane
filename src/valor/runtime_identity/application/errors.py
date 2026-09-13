@@ -20,3 +20,7 @@ class InvalidRuntimeIdentityCommand(RuntimeIdentityError):
 
 class RuntimePrincipalManagementDenied(RuntimeIdentityError):
     pass
+
+
+class RuntimeUsageLimitsAlreadyInitialized(RuntimeIdentityError):
+    pass

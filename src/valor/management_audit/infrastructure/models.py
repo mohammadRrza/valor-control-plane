@@ -13,12 +13,15 @@ class ManagementAuditRecordRow(SqlAlchemyBase):
         CheckConstraint(
             "action IN ('agent_model_permission_set', 'management_principal_created', "
             "'management_credential_issued', 'management_credential_revoked', "
-            "'management_principal_disabled', 'management_principal_scopes_set')",
+            "'management_principal_disabled', 'management_principal_scopes_set', "
+            "'runtime_principal_created', 'runtime_credential_issued', "
+            "'runtime_credential_revoked', 'runtime_principal_disabled', "
+            "'runtime_principal_usage_limits_initialized')",
             name="ck_management_audit_action",
         ),
         CheckConstraint(
             "resource_type IN ('agent_model_permission', 'management_principal', "
-            "'management_credential')",
+            "'management_credential', 'runtime_principal', 'runtime_credential')",
             name="ck_management_audit_resource_type",
         ),
         CheckConstraint("outcome IN ('succeeded', 'failed')", name="ck_management_audit_outcome"),

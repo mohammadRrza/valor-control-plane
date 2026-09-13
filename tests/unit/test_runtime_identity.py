@@ -22,6 +22,29 @@ def test_runtime_principal_disablement_is_terminal() -> None:
         disabled.disable(now + timedelta(seconds=2))
 
 
+def test_runtime_principal_usage_limits_are_all_or_none_valid_and_one_time() -> None:
+    now = datetime.now(UTC)
+    principal = RuntimePrincipal(uuid4(), uuid4(), uuid4(), now)
+
+    assert not principal.usage_limits_configured
+    configured = principal.initialize_usage_limits(1000, 100)
+    assert configured.usage_limits_configured
+    assert configured.daily_usage_limit_units == 1000
+    with pytest.raises(ValueError, match="already initialized"):
+        configured.initialize_usage_limits(1000, 100)
+    with pytest.raises(ValueError, match="configured together"):
+        RuntimePrincipal(uuid4(), uuid4(), uuid4(), now, daily_usage_limit_units=1000)
+    with pytest.raises(ValueError, match="invalid"):
+        RuntimePrincipal.create(uuid4(), uuid4(), uuid4(), now, 100, 101)
+
+
+def test_new_runtime_principal_factory_requires_configured_usage_limits() -> None:
+    now = datetime.now(UTC)
+    principal = RuntimePrincipal.create(uuid4(), uuid4(), uuid4(), now, 1000, 100)
+
+    assert principal.usage_limits_configured
+
+
 def test_runtime_credential_expiry_boundary_and_disabled_principal() -> None:
     now = datetime.now(UTC)
     credential = RuntimeCredential(

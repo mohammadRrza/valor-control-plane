@@ -46,7 +46,7 @@ The application is one deployable process. Operational routes are outside domain
 | Identity & Tenancy | principals, tenant isolation, ownership | upstream identity source for every context |
 | AI Asset Registry | agents, models, prompts, tools and versions | assets referenced by gateway, policy, evaluation |
 | Runtime Gateway | invocation and provider/tool routing | emits facts to observability, policy and FinOps |
-| Runtime Identity | durable Runtime Principal provisioning and credential lifecycle | immutable Tenant/Agent binding; inactive until Phase 5.0B cutover |
+| Runtime Identity | durable Runtime identity, credentials, and staged usage configuration | immutable Tenant/Agent binding; inactive until Phase 5.0C cutover |
 | Policy & Risk | authorization and risk decisions | evaluates runtime intent and asset metadata |
 | Evaluation | offline/online quality evidence | gates asset and routing changes |
 | Observability | traces, metrics and operational signals | consumes runtime facts; avoids owning business truth |
@@ -287,9 +287,11 @@ Tenant, Agent, Management, Runtime Gateway, web, validation, or ORM implementati
 Principal managers invoke the lifecycle API and every successful mutation shares one Unit of Work
 with Management audit evidence.
 
-Runtime Gateway does not import or query this context in Phase 5.0A. Static configuration remains
-the sole authentication and usage-limit authority, so a newly issued persisted bearer receives the
-same generic 401 as unknown external input. This prevents an ambiguous dual-authority interval.
+Runtime Gateway does not import or query this context in Phase 5.0B. Persisted usage limits are
+immutable cutover preparation, and a bounded credential-existence query derives a non-secret
+readiness boolean. Static configuration remains the sole authentication and usage-limit authority,
+so a newly issued persisted bearer receives the same generic 401 as unknown external input. This
+prevents an ambiguous dual-authority interval until Phase 5.0C switches both authorities together.
 
 ## Dependency and transaction rules
 

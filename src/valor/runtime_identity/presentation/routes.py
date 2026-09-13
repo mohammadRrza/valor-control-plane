@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request, status
 
 from valor.runtime_identity.application.handlers import (
     CreateRuntimePrincipalCommand,
+    InitializeRuntimeUsageLimitsCommand,
     IssueRuntimeCredentialCommand,
     RuntimeCredentialCommand,
     RuntimeIdentityActor,
@@ -17,6 +18,7 @@ from valor.runtime_identity.presentation.schemas import (
     IssuedRuntimeCredentialResponse,
     RuntimeCredentialResponse,
     RuntimePrincipalResponse,
+    RuntimeUsageLimitsRequest,
 )
 from valor.security.application.principal import AuthenticatedPrincipal
 from valor.security.presentation.authentication import require_management_principal
@@ -43,12 +45,14 @@ async def create(
             actor(principal),
             payload.tenant_id,
             payload.agent_id,
+            payload.daily_usage_limit_units,
+            payload.per_invocation_allowance_units,
             payload.credential.label,
             payload.credential.expires_at,
         )
     )
     return CreateRuntimePrincipalResponse(
-        principal=RuntimePrincipalResponse.from_domain(runtime_principal),
+        principal=RuntimePrincipalResponse.from_domain(runtime_principal, cutover_ready=True),
         credential=IssuedRuntimeCredentialResponse.from_issued(issued),
     )
 
@@ -59,7 +63,27 @@ async def get(
     principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
     identity: Annotated[RuntimeIdentityService, Depends(service)],
 ) -> RuntimePrincipalResponse:
-    return RuntimePrincipalResponse.from_domain(
+    return RuntimePrincipalResponse.from_details(
+        await identity.get_principal(actor(principal), principal_id)
+    )
+
+
+@router.put("/{principal_id}/usage-limits", response_model=RuntimePrincipalResponse)
+async def initialize_usage_limits(
+    principal_id: UUID,
+    payload: RuntimeUsageLimitsRequest,
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
+    identity: Annotated[RuntimeIdentityService, Depends(service)],
+) -> RuntimePrincipalResponse:
+    await identity.initialize_usage_limits(
+        InitializeRuntimeUsageLimitsCommand(
+            actor(principal),
+            principal_id,
+            payload.daily_usage_limit_units,
+            payload.per_invocation_allowance_units,
+        )
+    )
+    return RuntimePrincipalResponse.from_details(
         await identity.get_principal(actor(principal), principal_id)
     )
 
@@ -107,5 +131,5 @@ async def disable(
     identity: Annotated[RuntimeIdentityService, Depends(service)],
 ) -> RuntimePrincipalResponse:
     return RuntimePrincipalResponse.from_domain(
-        await identity.disable_principal(actor(principal), principal_id)
+        await identity.disable_principal(actor(principal), principal_id), cutover_ready=False
     )

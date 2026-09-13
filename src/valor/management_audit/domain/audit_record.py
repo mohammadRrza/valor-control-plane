@@ -15,6 +15,7 @@ class ManagementAuditAction(StrEnum):
     RUNTIME_CREDENTIAL_ISSUED = "runtime_credential_issued"
     RUNTIME_CREDENTIAL_REVOKED = "runtime_credential_revoked"
     RUNTIME_PRINCIPAL_DISABLED = "runtime_principal_disabled"
+    RUNTIME_PRINCIPAL_USAGE_LIMITS_INITIALIZED = "runtime_principal_usage_limits_initialized"
 
 
 class ManagementAuditResourceType(StrEnum):

@@ -6,7 +6,7 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 ## Status
 
-**Current phase: Phase 5.0A — persisted Runtime identity provisioning (in progress).**
+**Current phase: Phase 5.0B — persisted Runtime usage configuration and cutover readiness.**
 
 Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; persisted Management Principals with independent revocable credentials and Tenant scopes; separate static Runtime Principal authentication with Invocation read isolation; persisted Invocation duration, normalized provider usage, safe provider response correlation, immutable estimated-cost snapshots; bounded Tenant-scoped Runtime usage/cost reporting; and sequential Tenant daily estimated-cost budget enforcement.
 
@@ -24,17 +24,19 @@ immutable estimated USD cost snapshot. Pricing resolves by provider plus exact p
 reference. Costs use 12-decimal exact precision and remain stable when configuration changes.
 These values are configured attribution estimates, not reconciled provider invoice amounts.
 
-Phase 5.0A now provides Management-controlled persisted Runtime Principal provisioning, independent
-credential issuance/revocation, terminal disablement, and safe single-Principal retrieval. This is
-inactive provisioning state: static Runtime configuration remains the only invocation
-authentication and usage-limit authority until the explicit Phase 5.0B cutover.
+Phase 5.0B adds immutable persisted daily usage limits to new Runtime Principals and a one-time
+initializer for legacy 5.0A rows. Safe Principal retrieval reports whether identity, usage limits,
+and at least one potentially usable credential are ready for cutover. This is provisioning state:
+static Runtime configuration remains the only live authentication and usage-limit authority.
 
-Planned: the Phase 5.0B Runtime authentication and usage-limit cutover, richer conditional policy,
+Planned: the Phase 5.0C Runtime authentication and usage-limit cutover, richer conditional policy,
 human approval, tool/MCP governance, runtime routing and additional providers, evaluation,
 telemetry export, FinOps, incident, and compliance capabilities. Billing, rate limits, dashboards,
 exports, alerts, tracing backends, analytics warehouses, and retention/redaction are not complete.
 
 Experimental: none.
+
+Before Phase 5.0C, follow the [Runtime authentication cutover preparation guide](docs/operations/runtime-authentication-cutover.md).
 
 ## Architecture
 
@@ -50,6 +52,8 @@ cp .env.example .env
 # The bootstrap token works only while no persisted Management Principal exists.
 # After registering Agents, configure distinct runtime principals as a JSON array;
 # each entry binds identity and credential plus usage_limit and per_invocation_allowance.
+# These static values remain the legacy live authority through Phase 5.0B and are scheduled for
+# removal only when Phase 5.0C switches authentication and usage authority together.
 # Replace every example credential before any non-local use.
 uv sync --frozen
 uv run uvicorn valor.main:create_app --factory --reload
@@ -95,6 +99,7 @@ POST /api/v1/management/principals/{principal_id}/credentials/{credential_id}/re
 POST /api/v1/management/principals/{principal_id}/disable
 POST /api/v1/management/runtime-principals
 GET  /api/v1/management/runtime-principals/{principal_id}
+PUT  /api/v1/management/runtime-principals/{principal_id}/usage-limits
 POST /api/v1/management/runtime-principals/{principal_id}/credentials
 POST /api/v1/management/runtime-principals/{principal_id}/credentials/{credential_id}/revoke
 POST /api/v1/management/runtime-principals/{principal_id}/disable

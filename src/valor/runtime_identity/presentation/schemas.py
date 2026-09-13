@@ -3,7 +3,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from valor.runtime_identity.application.handlers import IssuedRuntimeCredential
+from valor.runtime_identity.application.handlers import (
+    IssuedRuntimeCredential,
+    RuntimePrincipalDetails,
+)
 from valor.runtime_identity.domain.models import RuntimeCredential, RuntimePrincipal
 
 
@@ -15,7 +18,14 @@ class CredentialRequest(BaseModel):
 class CreateRuntimePrincipalRequest(BaseModel):
     tenant_id: UUID
     agent_id: UUID
+    daily_usage_limit_units: int = Field(gt=0)
+    per_invocation_allowance_units: int = Field(gt=0)
     credential: CredentialRequest = CredentialRequest()
+
+
+class RuntimeUsageLimitsRequest(BaseModel):
+    daily_usage_limit_units: int = Field(gt=0)
+    per_invocation_allowance_units: int = Field(gt=0)
 
 
 class RuntimePrincipalResponse(BaseModel):
@@ -25,9 +35,14 @@ class RuntimePrincipalResponse(BaseModel):
     created_at: datetime
     disabled_at: datetime | None
     state: str
+    daily_usage_limit_units: int | None
+    per_invocation_allowance_units: int | None
+    cutover_ready: bool
 
     @classmethod
-    def from_domain(cls, value: RuntimePrincipal) -> "RuntimePrincipalResponse":
+    def from_domain(
+        cls, value: RuntimePrincipal, *, cutover_ready: bool
+    ) -> "RuntimePrincipalResponse":
         return cls(
             principal_id=value.principal_id,
             tenant_id=value.tenant_id,
@@ -35,7 +50,14 @@ class RuntimePrincipalResponse(BaseModel):
             created_at=value.created_at,
             disabled_at=value.disabled_at,
             state=value.state,
+            daily_usage_limit_units=value.daily_usage_limit_units,
+            per_invocation_allowance_units=value.per_invocation_allowance_units,
+            cutover_ready=cutover_ready,
         )
+
+    @classmethod
+    def from_details(cls, value: RuntimePrincipalDetails) -> "RuntimePrincipalResponse":
+        return cls.from_domain(value.principal, cutover_ready=value.cutover_ready)
 
 
 class RuntimeCredentialResponse(BaseModel):

@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from valor.infrastructure.sqlalchemy import SqlAlchemyBase
@@ -9,7 +9,28 @@ from valor.infrastructure.sqlalchemy import SqlAlchemyBase
 
 class RuntimePrincipalRow(SqlAlchemyBase):
     __tablename__ = "runtime_principals"
-    __table_args__ = (Index("ix_runtime_principals_binding", "tenant_id", "agent_id"),)
+    __table_args__ = (
+        CheckConstraint(
+            "(daily_usage_limit_units IS NULL AND per_invocation_allowance_units IS NULL) OR "
+            "(daily_usage_limit_units IS NOT NULL AND "
+            "per_invocation_allowance_units IS NOT NULL)",
+            name="ck_runtime_principal_usage_limits_together",
+        ),
+        CheckConstraint(
+            "daily_usage_limit_units IS NULL OR daily_usage_limit_units > 0",
+            name="ck_runtime_principal_daily_usage_limit_positive",
+        ),
+        CheckConstraint(
+            "per_invocation_allowance_units IS NULL OR per_invocation_allowance_units > 0",
+            name="ck_runtime_principal_allowance_positive",
+        ),
+        CheckConstraint(
+            "daily_usage_limit_units IS NULL OR "
+            "per_invocation_allowance_units <= daily_usage_limit_units",
+            name="ck_runtime_principal_allowance_within_limit",
+        ),
+        Index("ix_runtime_principals_binding", "tenant_id", "agent_id"),
+    )
     principal_id: Mapped[UUID] = mapped_column(primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id", name="fk_runtime_principal_tenant"), nullable=False
@@ -19,6 +40,8 @@ class RuntimePrincipalRow(SqlAlchemyBase):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    daily_usage_limit_units: Mapped[int | None] = mapped_column(Integer)
+    per_invocation_allowance_units: Mapped[int | None] = mapped_column(Integer)
 
 
 class RuntimeCredentialRow(SqlAlchemyBase):

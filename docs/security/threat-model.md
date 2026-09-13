@@ -175,14 +175,16 @@ credential last-use facts remain absent, while database administrators retain br
 
 ## STRIDE-oriented threat register
 
-Phase 5.0A adds a separate durable Runtime identity provisioning plane. Runtime Principal binding
+Phase 5.0B extends the separate durable Runtime identity provisioning plane. Runtime Principal binding
 to an existing Tenant and its Agent is immutable, lifecycle mutations require Management principal
 authority, and secret-free fingerprints commit atomically with those mutations. Runtime bearer
 plaintext and the distinct Runtime HMAC pepper never enter persistence or audit evidence.
 
-This foundation does not yet improve live Runtime authentication. Persisted Runtime credentials
-are intentionally rejected by Runtime Gateway; configuration-backed Runtime credentials remain
-the sole authority until Phase 5.0B. Static bearer theft and replay therefore remain material, and
+Persisted limits are all-or-none, positive, immutable in this slice, and atomically audited. A
+readiness view checks active state and credential expiry without revealing credential inventory.
+This preparation does not yet improve live Runtime authentication. Persisted Runtime credentials
+are intentionally rejected by Runtime Gateway; configuration-backed Runtime credentials and usage
+limits remain the sole authority until Phase 5.0C. Static bearer theft and replay remain material, and
 no claim of live revocation, rotation, federation, rate limiting, alerting, or SIEM support is made.
 
 | Category | Threat | Current control | Residual severity | Next control |

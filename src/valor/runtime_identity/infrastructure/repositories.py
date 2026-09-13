@@ -1,6 +1,9 @@
+from datetime import datetime
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import exists, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from valor.ai_asset_registry.infrastructure.models import AgentRow
@@ -21,6 +24,8 @@ class SqlAlchemyRuntimePrincipalRepository:
                 agent_id=value.agent_id,
                 created_at=value.created_at,
                 disabled_at=value.disabled_at,
+                daily_usage_limit_units=value.daily_usage_limit_units,
+                per_invocation_allowance_units=value.per_invocation_allowance_units,
             )
         )
         await self._session.flush()
@@ -31,7 +36,13 @@ class SqlAlchemyRuntimePrincipalRepository:
             None
             if row is None
             else RuntimePrincipal(
-                row.principal_id, row.tenant_id, row.agent_id, row.created_at, row.disabled_at
+                row.principal_id,
+                row.tenant_id,
+                row.agent_id,
+                row.created_at,
+                row.disabled_at,
+                row.daily_usage_limit_units,
+                row.per_invocation_allowance_units,
             )
         )
 
@@ -42,6 +53,22 @@ class SqlAlchemyRuntimePrincipalRepository:
             .values(disabled_at=value.disabled_at)
         )
         await self._session.flush()
+
+    async def initialize_usage_limits(self, value: RuntimePrincipal) -> bool:
+        result = await self._session.execute(
+            update(RuntimePrincipalRow)
+            .where(
+                RuntimePrincipalRow.principal_id == value.principal_id,
+                RuntimePrincipalRow.daily_usage_limit_units.is_(None),
+                RuntimePrincipalRow.per_invocation_allowance_units.is_(None),
+            )
+            .values(
+                daily_usage_limit_units=value.daily_usage_limit_units,
+                per_invocation_allowance_units=value.per_invocation_allowance_units,
+            )
+        )
+        await self._session.flush()
+        return cast(CursorResult[Any], result).rowcount == 1
 
 
 class SqlAlchemyRuntimeCredentialRepository:
@@ -85,6 +112,22 @@ class SqlAlchemyRuntimeCredentialRepository:
             .values(revoked_at=value.revoked_at)
         )
         await self._session.flush()
+
+    async def has_potentially_usable(self, principal_id: UUID, now: datetime) -> bool:
+        return bool(
+            await self._session.scalar(
+                select(
+                    exists().where(
+                        RuntimeCredentialRow.principal_id == principal_id,
+                        RuntimeCredentialRow.revoked_at.is_(None),
+                        or_(
+                            RuntimeCredentialRow.expires_at.is_(None),
+                            RuntimeCredentialRow.expires_at > now,
+                        ),
+                    )
+                )
+            )
+        )
 
 
 class SqlAlchemyRuntimeBinding:

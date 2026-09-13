@@ -8,6 +8,7 @@ from valor.runtime_identity.application.errors import (
     RuntimeCredentialNotFound,
     RuntimePrincipalManagementDenied,
     RuntimePrincipalNotFound,
+    RuntimeUsageLimitsAlreadyInitialized,
 )
 
 
@@ -36,4 +37,14 @@ def install_runtime_identity_error_handlers(app: FastAPI) -> None:
             title="Invalid Runtime Identity Command",
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
+        )
+
+    @app.exception_handler(RuntimeUsageLimitsAlreadyInitialized)
+    async def conflict(request: Request, exc: RuntimeUsageLimitsAlreadyInitialized) -> JSONResponse:
+        del exc
+        return problem_response(
+            request,
+            title="Runtime Usage Limits Already Initialized",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Runtime usage limits can only be initialized once.",
         )

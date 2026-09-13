@@ -19,6 +19,7 @@ from valor.runtime_identity.application.errors import (
     RuntimeCredentialNotFound,
     RuntimePrincipalManagementDenied,
     RuntimePrincipalNotFound,
+    RuntimeUsageLimitsAlreadyInitialized,
 )
 from valor.runtime_identity.application.ports import (
     RuntimeIdentityUnitOfWork,
@@ -48,6 +49,8 @@ class CreateRuntimePrincipalCommand:
     actor: RuntimeIdentityActor
     tenant_id: UUID
     agent_id: UUID
+    daily_usage_limit_units: int
+    per_invocation_allowance_units: int
     label: str | None
     expires_at: datetime | None
 
@@ -65,6 +68,20 @@ class RuntimeCredentialCommand:
     actor: RuntimeIdentityActor
     principal_id: UUID
     credential_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class InitializeRuntimeUsageLimitsCommand:
+    actor: RuntimeIdentityActor
+    principal_id: UUID
+    daily_usage_limit_units: int
+    per_invocation_allowance_units: int
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimePrincipalDetails:
+    principal: RuntimePrincipal
+    cutover_ready: bool
 
 
 class RuntimeIdentityService:
@@ -90,9 +107,17 @@ class RuntimeIdentityService:
         async with self._uow_factory() as uow:
             if not await uow.bindings.exists(command.tenant_id, command.agent_id):
                 raise RuntimeBindingNotFound
-            principal = RuntimePrincipal(
-                self._id_factory(), command.tenant_id, command.agent_id, now
-            )
+            try:
+                principal = RuntimePrincipal.create(
+                    self._id_factory(),
+                    command.tenant_id,
+                    command.agent_id,
+                    now,
+                    command.daily_usage_limit_units,
+                    command.per_invocation_allowance_units,
+                )
+            except ValueError as exc:
+                raise InvalidRuntimeIdentityCommand(str(exc)) from exc
             issued = self._new_credential(
                 principal.principal_id, command.label, command.expires_at, now
             )
@@ -120,13 +145,53 @@ class RuntimeIdentityService:
 
     async def get_principal(
         self, actor: RuntimeIdentityActor, principal_id: UUID
-    ) -> RuntimePrincipal:
+    ) -> RuntimePrincipalDetails:
         self._require_manager(actor)
+        now = self._clock()
         async with self._uow_factory() as uow:
             value = await uow.principals.get(principal_id)
+            has_usable_credential = (
+                False
+                if value is None
+                else await uow.credentials.has_potentially_usable(principal_id, now)
+            )
         if value is None:
             raise RuntimePrincipalNotFound
-        return value
+        return RuntimePrincipalDetails(
+            value,
+            value.is_active and value.usage_limits_configured and has_usable_credential,
+        )
+
+    async def initialize_usage_limits(
+        self, command: InitializeRuntimeUsageLimitsCommand
+    ) -> RuntimePrincipal:
+        self._require_manager(command.actor)
+        now = self._clock()
+        async with self._uow_factory() as uow:
+            principal = await uow.principals.get(command.principal_id)
+            if principal is None or not principal.is_active:
+                raise RuntimePrincipalNotFound
+            if principal.usage_limits_configured:
+                raise RuntimeUsageLimitsAlreadyInitialized
+            try:
+                configured = principal.initialize_usage_limits(
+                    command.daily_usage_limit_units,
+                    command.per_invocation_allowance_units,
+                )
+            except ValueError as exc:
+                raise InvalidRuntimeIdentityCommand(str(exc)) from exc
+            if not await uow.principals.initialize_usage_limits(configured):
+                raise RuntimeUsageLimitsAlreadyInitialized
+            await self._audit_principal(
+                uow,
+                command.actor.principal_id,
+                configured,
+                principal,
+                ManagementAuditAction.RUNTIME_PRINCIPAL_USAGE_LIMITS_INITIALIZED,
+                now,
+            )
+            await uow.commit()
+        return configured
 
     async def issue_credential(
         self, command: IssueRuntimeCredentialCommand
@@ -250,6 +315,8 @@ class RuntimeIdentityService:
                 tenant_id=principal.tenant_id,
                 agent_id=principal.agent_id,
                 disabled=not principal.is_active,
+                daily_usage_limit_units=principal.daily_usage_limit_units,
+                per_invocation_allowance_units=principal.per_invocation_allowance_units,
             )
 
         await uow.audits.append(
