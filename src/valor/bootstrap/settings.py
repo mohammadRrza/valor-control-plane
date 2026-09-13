@@ -99,14 +99,17 @@ class TenantBudgetSettings(BaseModel):
 class SecuritySettings(BaseModel):
     management_bootstrap_token: SecretStr = Field(min_length=32)
     management_credential_pepper: SecretStr = Field(min_length=32)
+    runtime_credential_pepper: SecretStr = Field(min_length=32)
 
     @model_validator(mode="after")
     def require_independent_secrets(self) -> "SecuritySettings":
-        if (
-            self.management_bootstrap_token.get_secret_value()
-            == self.management_credential_pepper.get_secret_value()
-        ):
-            raise ValueError("Management bootstrap token and credential pepper must be distinct.")
+        values = {
+            self.management_bootstrap_token.get_secret_value(),
+            self.management_credential_pepper.get_secret_value(),
+            self.runtime_credential_pepper.get_secret_value(),
+        }
+        if len(values) != 3:
+            raise ValueError("Bootstrap, Management pepper, and Runtime pepper must be distinct.")
         return self
 
 

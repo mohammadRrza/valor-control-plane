@@ -24,3 +24,4 @@ ADRs record decisions at the time they are made. Supersede rather than silently 
 - [ADR-0020](0020-bound-management-credential-use-evidence.md) — bounded Management credential-use authentication evidence
 - [ADR-0021](0021-bound-management-authentication-evidence-query.md) — bounded Principal-manager authentication evidence query
 - [ADR-0022](0022-bound-management-credential-inventory.md) — bounded Management credential inventory for manual rotation
+- [ADR-0023](0023-persist-runtime-principals-and-credentials.md) — persisted Runtime identity provisioning before explicit authentication cutover

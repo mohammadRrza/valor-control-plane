@@ -117,6 +117,10 @@ def test_database_url_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
         "VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER",
         "test-only-management-pepper-value-32-bytes",
     )
+    monkeypatch.setenv(
+        "VALOR_SECURITY__RUNTIME_CREDENTIAL_PEPPER",
+        "test-only-runtime-pepper-value-is-32-bytes",
+    )
     monkeypatch.setenv("VALOR_RUNTIME_AUTH__PRINCIPALS", "[]")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
@@ -133,6 +137,10 @@ def test_nested_environment_configuration(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv(
         "VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER",
         "test-only-management-pepper-value-32-bytes",
+    )
+    monkeypatch.setenv(
+        "VALOR_SECURITY__RUNTIME_CREDENTIAL_PEPPER",
+        "test-only-runtime-pepper-value-is-32-bytes",
     )
     monkeypatch.setenv(
         "VALOR_RUNTIME_AUTH__PRINCIPALS",
@@ -160,6 +168,7 @@ def test_management_credentials_are_required(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("VALOR_DATABASE__URL", "postgresql+psycopg://user:pass@db:5432/valor")
     monkeypatch.delenv("VALOR_SECURITY__MANAGEMENT_BOOTSTRAP_TOKEN", raising=False)
     monkeypatch.delenv("VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER", raising=False)
+    monkeypatch.delenv("VALOR_SECURITY__RUNTIME_CREDENTIAL_PEPPER", raising=False)
     monkeypatch.setenv("VALOR_RUNTIME_AUTH__PRINCIPALS", "[]")
     with pytest.raises(ValidationError) as error:
         Settings(_env_file=None)
@@ -175,6 +184,10 @@ def test_short_management_bootstrap_secret_fails_fast(
     monkeypatch.setenv(
         "VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER",
         "test-only-management-pepper-value-32-bytes",
+    )
+    monkeypatch.setenv(
+        "VALOR_SECURITY__RUNTIME_CREDENTIAL_PEPPER",
+        "test-only-runtime-pepper-value-is-32-bytes",
     )
     monkeypatch.setenv("VALOR_RUNTIME_AUTH__PRINCIPALS", "[]")
     with pytest.raises(ValidationError):
@@ -228,6 +241,7 @@ def test_bootstrap_credential_cannot_be_configured_as_runtime_credential() -> No
             security=SecuritySettings(
                 management_bootstrap_token=shared_credential,
                 management_credential_pepper="unit-management-pepper-at-least-32-bytes",
+                runtime_credential_pepper="unit-runtime-pepper-distinct-at-least-32-bytes",
             ),
             runtime_auth=RuntimeAuthenticationSettings(
                 principals=(
@@ -247,6 +261,19 @@ def test_bootstrap_token_and_pepper_must_be_distinct() -> None:
         SecuritySettings(
             management_bootstrap_token=shared,
             management_credential_pepper=shared,
+            runtime_credential_pepper="unit-runtime-pepper-distinct-at-least-32-bytes",
+        )
+
+
+@pytest.mark.parametrize("duplicate", ["bootstrap", "management"])
+def test_runtime_pepper_must_be_independent(duplicate: str) -> None:
+    bootstrap = "bootstrap-secret-that-is-at-least-32-bytes"
+    management = "management-pepper-that-is-at-least-32-bytes"
+    with pytest.raises(ValidationError):
+        SecuritySettings(
+            management_bootstrap_token=bootstrap,
+            management_credential_pepper=management,
+            runtime_credential_pepper=(bootstrap if duplicate == "bootstrap" else management),
         )
 
 

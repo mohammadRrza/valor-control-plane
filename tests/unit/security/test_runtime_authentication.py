@@ -29,6 +29,7 @@ def runtime_authentication_client() -> TestClient:
         security=SecuritySettings(
             management_bootstrap_token="unit-management-bootstrap-at-least-32-bytes",
             management_credential_pepper="unit-management-pepper-at-least-32-bytes",
+            runtime_credential_pepper="unit-runtime-pepper-distinct-at-least-32-bytes",
         ),
         runtime_auth=RuntimeAuthenticationSettings(
             principals=(

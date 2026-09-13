@@ -66,6 +66,7 @@ def test_business_context_cores_do_not_depend_on_security_transport() -> None:
         "policy_risk",
         "management_audit",
         "management_identity",
+        "runtime_identity",
     ):
         context = SOURCE / "valor" / context_name
         for layer in ("domain", "application"):
@@ -113,3 +114,29 @@ def test_runtime_gateway_does_not_import_management_identity() -> None:
             if imported_module.startswith("valor.management_identity"):
                 violations.append(f"{path.relative_to(SOURCE)}:{line} imports {imported_module}")
     assert not violations, "Runtime Management identity imports:\n" + "\n".join(violations)
+
+
+def test_runtime_identity_domain_is_framework_and_context_independent() -> None:
+    context = SOURCE / "valor" / "runtime_identity" / "domain"
+    forbidden = (
+        "valor.management_identity",
+        "valor.runtime_gateway",
+        "valor.identity_tenancy",
+        "valor.ai_asset_registry",
+    )
+    violations: list[str] = []
+    for path in context.rglob("*.py"):
+        for imported_module, line in imports_in(SOURCE, path):
+            if imported_module.startswith(forbidden):
+                violations.append(f"{path.relative_to(SOURCE)}:{line} imports {imported_module}")
+    assert not violations, "Runtime identity domain imports:\n" + "\n".join(violations)
+
+
+def test_runtime_gateway_does_not_import_runtime_identity() -> None:
+    context = SOURCE / "valor" / "runtime_gateway"
+    violations: list[str] = []
+    for path in context.rglob("*.py"):
+        for imported_module, line in imports_in(SOURCE, path):
+            if imported_module.startswith("valor.runtime_identity"):
+                violations.append(f"{path.relative_to(SOURCE)}:{line} imports {imported_module}")
+    assert not violations, "Runtime identity imports in gateway:\n" + "\n".join(violations)

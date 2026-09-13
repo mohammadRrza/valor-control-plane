@@ -6,7 +6,7 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 ## Status
 
-**Current phase: Phase 4 — Management governance evidence (in progress).**
+**Current phase: Phase 5.0A — persisted Runtime identity provisioning (in progress).**
 
 Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; persisted Management Principals with independent revocable credentials and Tenant scopes; separate static Runtime Principal authentication with Invocation read isolation; persisted Invocation duration, normalized provider usage, safe provider response correlation, immutable estimated-cost snapshots; bounded Tenant-scoped Runtime usage/cost reporting; and sequential Tenant daily estimated-cost budget enforcement.
 
@@ -24,7 +24,15 @@ immutable estimated USD cost snapshot. Pricing resolves by provider plus exact p
 reference. Costs use 12-decimal exact precision and remain stable when configuration changes.
 These values are configured attribution estimates, not reconciled provider invoice amounts.
 
-Planned: dynamic management grants, managed runtime credential rotation/revocation, richer conditional policy, human approval, tool/MCP governance, runtime routing and additional providers, evaluation, telemetry export, FinOps, incident, and compliance capabilities. Billing, budgets, rate limits, dashboards, exports, alerts, tracing backends, analytics warehouses, and retention/redaction are not implemented. No bounded context, policy engine, identity platform, or LLM gateway is complete.
+Phase 5.0A now provides Management-controlled persisted Runtime Principal provisioning, independent
+credential issuance/revocation, terminal disablement, and safe single-Principal retrieval. This is
+inactive provisioning state: static Runtime configuration remains the only invocation
+authentication and usage-limit authority until the explicit Phase 5.0B cutover.
+
+Planned: the Phase 5.0B Runtime authentication and usage-limit cutover, richer conditional policy,
+human approval, tool/MCP governance, runtime routing and additional providers, evaluation,
+telemetry export, FinOps, incident, and compliance capabilities. Billing, rate limits, dashboards,
+exports, alerts, tracing backends, analytics warehouses, and retention/redaction are not complete.
 
 Experimental: none.
 
@@ -38,7 +46,7 @@ Prerequisites: Python 3.13, [uv](https://docs.astral.sh/uv/), and optionally Doc
 
 ```bash
 cp .env.example .env
-# Supply independent long random bootstrap-token and credential-pepper values.
+# Supply independent bootstrap, Management-pepper, and Runtime-pepper values.
 # The bootstrap token works only while no persisted Management Principal exists.
 # After registering Agents, configure distinct runtime principals as a JSON array;
 # each entry binds identity and credential plus usage_limit and per_invocation_allowance.
@@ -85,6 +93,11 @@ PUT  /api/v1/management/principals/{principal_id}/tenant-scopes
 POST /api/v1/management/principals/{principal_id}/credentials
 POST /api/v1/management/principals/{principal_id}/credentials/{credential_id}/revoke
 POST /api/v1/management/principals/{principal_id}/disable
+POST /api/v1/management/runtime-principals
+GET  /api/v1/management/runtime-principals/{principal_id}
+POST /api/v1/management/runtime-principals/{principal_id}/credentials
+POST /api/v1/management/runtime-principals/{principal_id}/credentials/{credential_id}/revoke
+POST /api/v1/management/runtime-principals/{principal_id}/disable
 ```
 
 ## Repository layout
@@ -124,6 +137,11 @@ src/valor/
     application/    bootstrap, authentication/evidence, lifecycle, and atomic audit orchestration
     infrastructure/ SQLAlchemy repositories, bounded evidence, UoW, and bootstrap serialization
     presentation/   bootstrap and principal-management HTTP boundary
+  runtime_identity/
+    domain/         immutable Tenant/Agent binding and terminal lifecycle
+    application/    Management-controlled provisioning and atomic audit orchestration
+    infrastructure/ SQLAlchemy persistence, binding validation, and UoW
+    presentation/   narrow Runtime identity lifecycle Management API
   security/
     application/    authenticated principal and explicit Tenant authorization rule
     presentation/   bearer parsing, constant-time validation, and HTTP error mapping

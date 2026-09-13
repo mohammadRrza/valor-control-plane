@@ -46,6 +46,7 @@ The application is one deployable process. Operational routes are outside domain
 | Identity & Tenancy | principals, tenant isolation, ownership | upstream identity source for every context |
 | AI Asset Registry | agents, models, prompts, tools and versions | assets referenced by gateway, policy, evaluation |
 | Runtime Gateway | invocation and provider/tool routing | emits facts to observability, policy and FinOps |
+| Runtime Identity | durable Runtime Principal provisioning and credential lifecycle | immutable Tenant/Agent binding; inactive until Phase 5.0B cutover |
 | Policy & Risk | authorization and risk decisions | evaluates runtime intent and asset metadata |
 | Evaluation | offline/online quality evidence | gates asset and routing changes |
 | Observability | traces, metrics and operational signals | consumes runtime facts; avoids owning business truth |
@@ -277,6 +278,18 @@ interpret the management credential as Agent identity; runtime credentials likew
 management authentication. Static principals are configured only after generated Agent IDs exist.
 Future evolution may add managed issuance/rotation/revocation and workload identity or mTLS when
 deployment requirements justify them.
+
+### Persisted Runtime identity staging boundary
+
+`runtime_identity` owns persisted Runtime Principals and independent credential lifecycle. Its
+application layer validates Tenant/Agent ownership through a narrow port; its domain imports no
+Tenant, Agent, Management, Runtime Gateway, web, validation, or ORM implementation. Management
+Principal managers invoke the lifecycle API and every successful mutation shares one Unit of Work
+with Management audit evidence.
+
+Runtime Gateway does not import or query this context in Phase 5.0A. Static configuration remains
+the sole authentication and usage-limit authority, so a newly issued persisted bearer receives the
+same generic 401 as unknown external input. This prevents an ambiguous dual-authority interval.
 
 ## Dependency and transaction rules
 

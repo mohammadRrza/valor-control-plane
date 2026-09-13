@@ -62,6 +62,8 @@ async def clean_runtime_tables(runtime_database_url: str) -> AsyncIterator[None]
     engine = create_async_engine(runtime_database_url)
     async with engine.begin() as connection:
         await connection.execute(text("DELETE FROM management_audit_records"))
+        await connection.execute(text("DELETE FROM runtime_credentials"))
+        await connection.execute(text("DELETE FROM runtime_principals"))
         await connection.execute(text("DELETE FROM management_authentication_evidence"))
         await connection.execute(text("DELETE FROM management_credentials"))
         await connection.execute(text("DELETE FROM management_principal_tenant_scopes"))
@@ -75,6 +77,8 @@ async def clean_runtime_tables(runtime_database_url: str) -> AsyncIterator[None]
     yield
     async with engine.begin() as connection:
         await connection.execute(text("DELETE FROM management_audit_records"))
+        await connection.execute(text("DELETE FROM runtime_credentials"))
+        await connection.execute(text("DELETE FROM runtime_principals"))
         await connection.execute(text("DELETE FROM management_authentication_evidence"))
         await connection.execute(text("DELETE FROM management_credentials"))
         await connection.execute(text("DELETE FROM management_principal_tenant_scopes"))
@@ -103,6 +107,7 @@ def runtime_client(
         security=SecuritySettings(
             management_bootstrap_token=BOOTSTRAP_TOKEN,
             management_credential_pepper=PEPPER,
+            runtime_credential_pepper="runtime-pepper-distinct-and-at-least-32-bytes",
         ),
         runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )
@@ -121,6 +126,7 @@ def unauthenticated_runtime_client(
         security=SecuritySettings(
             management_bootstrap_token=BOOTSTRAP_TOKEN,
             management_credential_pepper=PEPPER,
+            runtime_credential_pepper="runtime-pepper-distinct-and-at-least-32-bytes",
         ),
         runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )

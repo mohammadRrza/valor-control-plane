@@ -62,6 +62,7 @@ def postgres_client(tenant_database_url: str) -> Iterator[TestClient]:
         security=SecuritySettings(
             management_bootstrap_token=BOOTSTRAP_TOKEN,
             management_credential_pepper=PEPPER,
+            runtime_credential_pepper="runtime-pepper-distinct-and-at-least-32-bytes",
         ),
         runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )

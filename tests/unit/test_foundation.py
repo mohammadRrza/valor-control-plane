@@ -23,6 +23,10 @@ def test_settings_factory_reads_environment(monkeypatch: pytest.MonkeyPatch) -> 
         "VALOR_SECURITY__MANAGEMENT_CREDENTIAL_PEPPER",
         "test-only-management-pepper-value-32-bytes",
     )
+    monkeypatch.setenv(
+        "VALOR_SECURITY__RUNTIME_CREDENTIAL_PEPPER",
+        "test-only-runtime-pepper-value-is-32-bytes",
+    )
     monkeypatch.setenv("VALOR_RUNTIME_AUTH__PRINCIPALS", "[]")
     assert get_settings().database.url.hosts()[0]["host"] == "localhost"
     get_settings.cache_clear()

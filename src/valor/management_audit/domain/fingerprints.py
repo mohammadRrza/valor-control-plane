@@ -56,3 +56,39 @@ def management_credential_fingerprint(
         )
     )
     return sha256(canonical.encode()).hexdigest()
+
+
+def runtime_principal_fingerprint(
+    *, principal_id: UUID, tenant_id: UUID, agent_id: UUID, disabled: bool
+) -> str:
+    canonical = "\n".join(
+        (
+            f"principal_id={principal_id}",
+            f"tenant_id={tenant_id}",
+            f"agent_id={agent_id}",
+            f"disabled={str(disabled).lower()}",
+        )
+    )
+    return sha256(canonical.encode()).hexdigest()
+
+
+def runtime_credential_fingerprint(
+    *,
+    credential_id: UUID,
+    principal_id: UUID,
+    label: str | None,
+    created_at: str,
+    expires_at: str | None,
+    revoked: bool,
+) -> str:
+    canonical = "\n".join(
+        (
+            f"credential_id={credential_id}",
+            f"principal_id={principal_id}",
+            f"label={'' if label is None else ' '.join(label.split())}",
+            f"created_at={created_at}",
+            f"expires_at={expires_at or ''}",
+            f"revoked={str(revoked).lower()}",
+        )
+    )
+    return sha256(canonical.encode()).hexdigest()

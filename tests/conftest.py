@@ -20,6 +20,7 @@ def settings() -> Settings:
         security=SecuritySettings(
             management_bootstrap_token="test-only-management-bootstrap-token-32-bytes",
             management_credential_pepper="test-only-management-pepper-value-32-bytes",
+            runtime_credential_pepper="test-only-runtime-pepper-value-is-32-bytes",
         ),
         runtime_auth=RuntimeAuthenticationSettings(principals=()),
     )

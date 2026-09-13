@@ -17,6 +17,7 @@ from valor.management_identity.infrastructure.models import (
 )
 from valor.policy_risk.infrastructure.models import AgentModelPermissionRow, PolicyDecisionRow
 from valor.runtime_gateway.infrastructure.models import InvocationRow
+from valor.runtime_identity.infrastructure.models import RuntimeCredentialRow, RuntimePrincipalRow
 
 _mapped_rows = (
     TenantRow,
@@ -29,6 +30,8 @@ _mapped_rows = (
     ManagementPrincipalRow,
     ManagementPrincipalTenantScopeRow,
     ManagementCredentialRow,
+    RuntimePrincipalRow,
+    RuntimeCredentialRow,
 )
 
 config = context.config

@@ -11,12 +11,18 @@ class ManagementAuditAction(StrEnum):
     MANAGEMENT_CREDENTIAL_REVOKED = "management_credential_revoked"
     MANAGEMENT_PRINCIPAL_DISABLED = "management_principal_disabled"
     MANAGEMENT_PRINCIPAL_SCOPES_SET = "management_principal_scopes_set"
+    RUNTIME_PRINCIPAL_CREATED = "runtime_principal_created"
+    RUNTIME_CREDENTIAL_ISSUED = "runtime_credential_issued"
+    RUNTIME_CREDENTIAL_REVOKED = "runtime_credential_revoked"
+    RUNTIME_PRINCIPAL_DISABLED = "runtime_principal_disabled"
 
 
 class ManagementAuditResourceType(StrEnum):
     AGENT_MODEL_PERMISSION = "agent_model_permission"
     MANAGEMENT_PRINCIPAL = "management_principal"
     MANAGEMENT_CREDENTIAL = "management_credential"
+    RUNTIME_PRINCIPAL = "runtime_principal"
+    RUNTIME_CREDENTIAL = "runtime_credential"
 
 
 class ManagementAuditOutcome(StrEnum):

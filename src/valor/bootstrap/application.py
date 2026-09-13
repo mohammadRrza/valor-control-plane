@@ -58,6 +58,10 @@ from valor.runtime_gateway.infrastructure.usage_reader import PostgresRuntimeUsa
 from valor.runtime_gateway.presentation.errors import install_runtime_gateway_error_handlers
 from valor.runtime_gateway.presentation.reporting_routes import router as runtime_reporting_router
 from valor.runtime_gateway.presentation.routes import router as runtime_router
+from valor.runtime_identity.application.handlers import RuntimeIdentityService
+from valor.runtime_identity.infrastructure.unit_of_work import SqlAlchemyRuntimeIdentityUnitOfWork
+from valor.runtime_identity.presentation.errors import install_runtime_identity_error_handlers
+from valor.runtime_identity.presentation.routes import router as runtime_identity_router
 from valor.security.presentation.authentication import require_management_principal
 from valor.security.presentation.errors import install_security_error_handlers
 
@@ -113,6 +117,10 @@ def create_app(
             pepper=pepper,
             bootstrap_token=resolved.security.management_bootstrap_token.get_secret_value(),
         )
+        app.state.runtime_identity_service = RuntimeIdentityService(
+            partial(SqlAlchemyRuntimeIdentityUnitOfWork, database.sessions),
+            pepper=resolved.security.runtime_credential_pepper.get_secret_value(),
+        )
         app.state.runtime_policy = RuntimePolicyAdapter(app.state.policy_uow_factory)
         api_key = resolved.provider.openai_api_key
         api_key_value = api_key.get_secret_value() if api_key is not None else None
@@ -140,6 +148,7 @@ def create_app(
     app.include_router(policy_router, prefix="/api/v1", dependencies=management_auth)
     app.include_router(management_audit_router, prefix="/api/v1", dependencies=management_auth)
     app.include_router(management_identity_router, prefix="/api/v1")
+    app.include_router(runtime_identity_router, prefix="/api/v1")
     install_error_handlers(app)
     install_identity_tenancy_error_handlers(app)
     install_ai_asset_registry_error_handlers(app)
@@ -147,5 +156,6 @@ def create_app(
     install_policy_error_handlers(app)
     install_management_audit_error_handlers(app)
     install_management_identity_error_handlers(app)
+    install_runtime_identity_error_handlers(app)
     install_security_error_handlers(app)
     return app
