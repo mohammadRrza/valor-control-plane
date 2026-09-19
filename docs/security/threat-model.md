@@ -187,6 +187,13 @@ are intentionally rejected by Runtime Gateway; configuration-backed Runtime cred
 limits remain the sole authority until Phase 5.0C. Static bearer theft and replay remain material, and
 no claim of live revocation, rotation, federation, rate limiting, alerting, or SIEM support is made.
 
+Phase 5.0B.1 prevents quota reset, historical ownership loss, ambiguous Tenant/Agent migration, and
+accidental second workload identity during the future cutover. The mapping is explicit, validated
+against live static configuration and aggregate historical bindings, unique, immutable through the
+application, and atomically audited. Incorrect operator selection remains security-sensitive;
+database administrators can tamper with mappings, legacy identity metadata is long-lived, and
+static bearer replay remains possible until Phase 5.0C.
+
 | Category | Threat | Current control | Residual severity | Next control |
 |---|---|---|---|---|
 | Spoofing | Caller claims another Agent/Tenant at runtime | Identity derives from a credential bound to one Tenant/Agent | Mitigated; credential theft remains High | Rotation/revocation and workload identity |

@@ -287,11 +287,18 @@ Tenant, Agent, Management, Runtime Gateway, web, validation, or ORM implementati
 Principal managers invoke the lifecycle API and every successful mutation shares one Unit of Work
 with Management audit evidence.
 
-Runtime Gateway does not import or query this context in Phase 5.0B. Persisted usage limits are
+Runtime Gateway does not import or query this context in Phase 5.0B.1. Persisted usage limits are
 immutable cutover preparation, and a bounded credential-existence query derives a non-secret
 readiness boolean. Static configuration remains the sole authentication and usage-limit authority,
 so a newly issued persisted bearer receives the same generic 401 as unknown external input. This
 prevents an ambiguous dual-authority interval until Phase 5.0C switches both authorities together.
+
+Because legacy Runtime IDs are arbitrary strings while persisted Principal IDs are UUIDs, an
+explicit one-to-one continuity binding records at most one historical legacy ID on the selected
+persisted Principal. Preflight and binding use narrow static-configuration and aggregate Invocation
+ports; they never auto-select by Tenant/Agent or load Invocation content. Historical rows remain
+unchanged. Phase 5.0C may treat the canonical UUID string plus optional legacy ID as one bounded
+identity set for usage aggregation and read isolation.
 
 ## Dependency and transaction rules
 

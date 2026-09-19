@@ -59,6 +59,9 @@ from valor.runtime_gateway.presentation.errors import install_runtime_gateway_er
 from valor.runtime_gateway.presentation.reporting_routes import router as runtime_reporting_router
 from valor.runtime_gateway.presentation.routes import router as runtime_router
 from valor.runtime_identity.application.handlers import RuntimeIdentityService
+from valor.runtime_identity.infrastructure.legacy_configuration import (
+    ConfiguredLegacyRuntimeIdentities,
+)
 from valor.runtime_identity.infrastructure.unit_of_work import SqlAlchemyRuntimeIdentityUnitOfWork
 from valor.runtime_identity.presentation.errors import install_runtime_identity_error_handlers
 from valor.runtime_identity.presentation.routes import router as runtime_identity_router
@@ -120,6 +123,9 @@ def create_app(
         app.state.runtime_identity_service = RuntimeIdentityService(
             partial(SqlAlchemyRuntimeIdentityUnitOfWork, database.sessions),
             pepper=resolved.security.runtime_credential_pepper.get_secret_value(),
+            legacy_configurations=ConfiguredLegacyRuntimeIdentities(
+                lambda: app.state.settings.runtime_auth
+            ),
         )
         app.state.runtime_policy = RuntimePolicyAdapter(app.state.policy_uow_factory)
         api_key = resolved.provider.openai_api_key

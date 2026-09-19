@@ -116,8 +116,8 @@ def test_runtime_gateway_does_not_import_management_identity() -> None:
     assert not violations, "Runtime Management identity imports:\n" + "\n".join(violations)
 
 
-def test_runtime_identity_domain_is_framework_and_context_independent() -> None:
-    context = SOURCE / "valor" / "runtime_identity" / "domain"
+def test_runtime_identity_core_is_framework_and_context_independent() -> None:
+    context = SOURCE / "valor" / "runtime_identity"
     forbidden = (
         "valor.management_identity",
         "valor.runtime_gateway",
@@ -125,11 +125,14 @@ def test_runtime_identity_domain_is_framework_and_context_independent() -> None:
         "valor.ai_asset_registry",
     )
     violations: list[str] = []
-    for path in context.rglob("*.py"):
-        for imported_module, line in imports_in(SOURCE, path):
-            if imported_module.startswith(forbidden):
-                violations.append(f"{path.relative_to(SOURCE)}:{line} imports {imported_module}")
-    assert not violations, "Runtime identity domain imports:\n" + "\n".join(violations)
+    for layer in ("domain", "application"):
+        for path in (context / layer).rglob("*.py"):
+            for imported_module, line in imports_in(SOURCE, path):
+                if imported_module.startswith(forbidden):
+                    violations.append(
+                        f"{path.relative_to(SOURCE)}:{line} imports {imported_module}"
+                    )
+    assert not violations, "Runtime identity core imports:\n" + "\n".join(violations)
 
 
 def test_runtime_gateway_does_not_import_runtime_identity() -> None:

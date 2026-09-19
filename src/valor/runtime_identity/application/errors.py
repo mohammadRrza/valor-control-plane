@@ -24,3 +24,7 @@ class RuntimePrincipalManagementDenied(RuntimeIdentityError):
 
 class RuntimeUsageLimitsAlreadyInitialized(RuntimeIdentityError):
     pass
+
+
+class RuntimeIdentityContinuityConflict(RuntimeIdentityError):
+    pass

@@ -1,10 +1,12 @@
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from valor.runtime_identity.application.handlers import (
     IssuedRuntimeCredential,
+    RuntimeIdentityContinuityPreflight,
     RuntimePrincipalDetails,
 )
 from valor.runtime_identity.domain.models import RuntimeCredential, RuntimePrincipal
@@ -28,6 +30,12 @@ class RuntimeUsageLimitsRequest(BaseModel):
     per_invocation_allowance_units: int = Field(gt=0)
 
 
+class RuntimeIdentityContinuityRequest(BaseModel):
+    legacy_runtime_principal_id: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ]
+
+
 class RuntimePrincipalResponse(BaseModel):
     principal_id: UUID
     tenant_id: UUID
@@ -38,6 +46,9 @@ class RuntimePrincipalResponse(BaseModel):
     daily_usage_limit_units: int | None
     per_invocation_allowance_units: int | None
     cutover_ready: bool
+    legacy_runtime_principal_id: str | None
+    identity_continuity_bound_at: datetime | None
+    identity_continuity_ready: bool
 
     @classmethod
     def from_domain(
@@ -53,6 +64,9 @@ class RuntimePrincipalResponse(BaseModel):
             daily_usage_limit_units=value.daily_usage_limit_units,
             per_invocation_allowance_units=value.per_invocation_allowance_units,
             cutover_ready=cutover_ready,
+            legacy_runtime_principal_id=value.legacy_runtime_principal_id,
+            identity_continuity_bound_at=value.identity_continuity_bound_at,
+            identity_continuity_ready=value.identity_continuity_ready,
         )
 
     @classmethod
@@ -92,3 +106,25 @@ class IssuedRuntimeCredentialResponse(RuntimeCredentialResponse):
 class CreateRuntimePrincipalResponse(BaseModel):
     principal: RuntimePrincipalResponse
     credential: IssuedRuntimeCredentialResponse
+
+
+class RuntimeIdentityContinuityPreflightResponse(BaseModel):
+    principal_id: UUID
+    legacy_runtime_principal_id: str
+    static_identity_exists: bool
+    tenant_binding_matches: bool
+    agent_binding_matches: bool
+    legacy_identity_unclaimed: bool
+    principal_unbound: bool
+    historical_invocation_count: int
+    same_day_attributed_usage_units: int
+    usage_limits_match: bool
+    historical_bindings_consistent: bool
+    cutover_ready: bool
+    safe_to_bind: bool
+
+    @classmethod
+    def from_application(
+        cls, value: RuntimeIdentityContinuityPreflight
+    ) -> "RuntimeIdentityContinuityPreflightResponse":
+        return cls(**{field: getattr(value, field) for field in cls.model_fields})

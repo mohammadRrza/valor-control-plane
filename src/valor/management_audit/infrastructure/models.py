@@ -16,7 +16,8 @@ class ManagementAuditRecordRow(SqlAlchemyBase):
             "'management_principal_disabled', 'management_principal_scopes_set', "
             "'runtime_principal_created', 'runtime_credential_issued', "
             "'runtime_credential_revoked', 'runtime_principal_disabled', "
-            "'runtime_principal_usage_limits_initialized')",
+            "'runtime_principal_usage_limits_initialized', "
+            "'runtime_principal_identity_continuity_bound')",
             name="ck_management_audit_action",
         ),
         CheckConstraint(

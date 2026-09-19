@@ -66,6 +66,7 @@ def runtime_principal_fingerprint(
     disabled: bool,
     daily_usage_limit_units: int | None,
     per_invocation_allowance_units: int | None,
+    legacy_runtime_principal_id: str | None,
 ) -> str:
     canonical = "\n".join(
         (
@@ -74,6 +75,7 @@ def runtime_principal_fingerprint(
             f"agent_id={agent_id}",
             f"daily_usage_limit_units={daily_usage_limit_units or ''}",
             f"per_invocation_allowance_units={per_invocation_allowance_units or ''}",
+            f"legacy_runtime_principal_id={legacy_runtime_principal_id or ''}",
             f"disabled={str(disabled).lower()}",
         )
     )

@@ -2,12 +2,14 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import exists, or_, select, update
+from sqlalchemy import case, exists, func, or_, select, text, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from valor.ai_asset_registry.infrastructure.models import AgentRow
 from valor.identity_tenancy.infrastructure.models import TenantRow
+from valor.runtime_gateway.infrastructure.models import InvocationRow
+from valor.runtime_identity.application.ports import RuntimeInvocationContinuityFacts
 from valor.runtime_identity.domain.models import RuntimeCredential, RuntimePrincipal
 from valor.runtime_identity.infrastructure.models import RuntimeCredentialRow, RuntimePrincipalRow
 
@@ -26,6 +28,8 @@ class SqlAlchemyRuntimePrincipalRepository:
                 disabled_at=value.disabled_at,
                 daily_usage_limit_units=value.daily_usage_limit_units,
                 per_invocation_allowance_units=value.per_invocation_allowance_units,
+                legacy_runtime_principal_id=value.legacy_runtime_principal_id,
+                identity_continuity_bound_at=value.identity_continuity_bound_at,
             )
         )
         await self._session.flush()
@@ -43,7 +47,31 @@ class SqlAlchemyRuntimePrincipalRepository:
                 row.disabled_at,
                 row.daily_usage_limit_units,
                 row.per_invocation_allowance_units,
+                row.legacy_runtime_principal_id,
+                row.identity_continuity_bound_at,
             )
+        )
+
+    async def get_for_update(self, principal_id: UUID) -> RuntimePrincipal | None:
+        row = await self._session.scalar(
+            select(RuntimePrincipalRow)
+            .where(RuntimePrincipalRow.principal_id == principal_id)
+            .with_for_update()
+        )
+        return None if row is None else self._to_domain(row)
+
+    @staticmethod
+    def _to_domain(row: RuntimePrincipalRow) -> RuntimePrincipal:
+        return RuntimePrincipal(
+            row.principal_id,
+            row.tenant_id,
+            row.agent_id,
+            row.created_at,
+            row.disabled_at,
+            row.daily_usage_limit_units,
+            row.per_invocation_allowance_units,
+            row.legacy_runtime_principal_id,
+            row.identity_continuity_bound_at,
         )
 
     async def disable(self, value: RuntimePrincipal) -> None:
@@ -65,6 +93,35 @@ class SqlAlchemyRuntimePrincipalRepository:
             .values(
                 daily_usage_limit_units=value.daily_usage_limit_units,
                 per_invocation_allowance_units=value.per_invocation_allowance_units,
+            )
+        )
+        await self._session.flush()
+        return cast(CursorResult[Any], result).rowcount == 1
+
+    async def lock_legacy_identity(self, legacy_id: str) -> None:
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:legacy_id, 0))"),
+            {"legacy_id": legacy_id},
+        )
+
+    async def legacy_identity_is_claimed(self, legacy_id: str) -> bool:
+        return bool(
+            await self._session.scalar(
+                select(exists().where(RuntimePrincipalRow.legacy_runtime_principal_id == legacy_id))
+            )
+        )
+
+    async def bind_identity_continuity(self, value: RuntimePrincipal) -> bool:
+        result = await self._session.execute(
+            update(RuntimePrincipalRow)
+            .where(
+                RuntimePrincipalRow.principal_id == value.principal_id,
+                RuntimePrincipalRow.legacy_runtime_principal_id.is_(None),
+                RuntimePrincipalRow.identity_continuity_bound_at.is_(None),
+            )
+            .values(
+                legacy_runtime_principal_id=value.legacy_runtime_principal_id,
+                identity_continuity_bound_at=value.identity_continuity_bound_at,
             )
         )
         await self._session.flush()
@@ -142,3 +199,80 @@ class SqlAlchemyRuntimeBinding:
                 .where(AgentRow.id == agent_id, AgentRow.tenant_id == tenant_id)
             )
         ) is not None
+
+
+class SqlAlchemyRuntimeInvocationContinuity:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def inspect(
+        self,
+        *,
+        legacy_id: str,
+        canonical_id: str,
+        tenant_id: UUID,
+        agent_id: UUID,
+        day_start: datetime,
+        day_end: datetime,
+    ) -> RuntimeInvocationContinuityFacts:
+        legacy = InvocationRow.runtime_principal_id == legacy_id
+        canonical = InvocationRow.runtime_principal_id == canonical_id
+        row = (
+            await self._session.execute(
+                select(
+                    func.count(case((legacy, 1))),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (
+                                    legacy
+                                    & (InvocationRow.started_at >= day_start)
+                                    & (InvocationRow.started_at < day_end),
+                                    InvocationRow.total_units,
+                                ),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.bool_or(
+                            legacy
+                            & or_(
+                                InvocationRow.tenant_id != tenant_id,
+                                InvocationRow.agent_id != agent_id,
+                            )
+                        ),
+                        False,
+                    ),
+                    func.coalesce(
+                        func.bool_or(
+                            canonical
+                            & or_(
+                                InvocationRow.tenant_id != tenant_id,
+                                InvocationRow.agent_id != agent_id,
+                            )
+                        ),
+                        False,
+                    ),
+                ).where(or_(legacy, canonical))
+            )
+        ).one()
+        return RuntimeInvocationContinuityFacts(
+            int(row[0]), int(row[1]), bool(row[2]), bool(row[3])
+        )
+
+    async def consumed_total_units(
+        self, identity_ids: frozenset[str], day_start: datetime, day_end: datetime
+    ) -> int:
+        return int(
+            await self._session.scalar(
+                select(func.coalesce(func.sum(InvocationRow.total_units), 0)).where(
+                    InvocationRow.runtime_principal_id.in_(identity_ids),
+                    InvocationRow.started_at >= day_start,
+                    InvocationRow.started_at < day_end,
+                    InvocationRow.total_units.is_not(None),
+                )
+            )
+            or 0
+        )

@@ -45,6 +45,29 @@ def test_new_runtime_principal_factory_requires_configured_usage_limits() -> Non
     assert principal.usage_limits_configured
 
 
+def test_runtime_identity_continuity_is_single_immutable_and_bounded() -> None:
+    now = datetime.now(UTC)
+    principal = RuntimePrincipal.create(uuid4(), uuid4(), uuid4(), now, 1000, 100)
+    bound = principal.bind_identity_continuity(" legacy-runtime-a ", now)
+
+    assert bound.legacy_runtime_principal_id == "legacy-runtime-a"
+    assert bound.identity_continuity_ready
+    assert bound.continuity_identity_ids == {
+        str(bound.principal_id),
+        "legacy-runtime-a",
+    }
+    with pytest.raises(ValueError, match="already bound"):
+        bound.bind_identity_continuity("legacy-runtime-b", now)
+    with pytest.raises(ValueError, match="configured together"):
+        RuntimePrincipal(
+            uuid4(),
+            uuid4(),
+            uuid4(),
+            now,
+            legacy_runtime_principal_id="legacy-runtime-a",
+        )
+
+
 def test_runtime_credential_expiry_boundary_and_disabled_principal() -> None:
     now = datetime.now(UTC)
     credential = RuntimeCredential(

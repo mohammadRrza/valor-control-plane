@@ -16,6 +16,8 @@ class RuntimePrincipal:
     disabled_at: datetime | None = None
     daily_usage_limit_units: int | None = None
     per_invocation_allowance_units: int | None = None
+    legacy_runtime_principal_id: str | None = None
+    identity_continuity_bound_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not _aware(self.created_at) or (
@@ -33,6 +35,20 @@ class RuntimePrincipal:
             and (daily <= 0 or allowance <= 0 or allowance > daily)
         ):
             raise ValueError("runtime usage limits are invalid")
+        legacy = (
+            self.legacy_runtime_principal_id.strip()
+            if self.legacy_runtime_principal_id is not None
+            else None
+        )
+        object.__setattr__(self, "legacy_runtime_principal_id", legacy)
+        if (legacy is None) != (self.identity_continuity_bound_at is None):
+            raise ValueError("legacy identity and binding time must be configured together")
+        if legacy is not None and (not legacy or len(legacy) > 255):
+            raise ValueError("legacy runtime principal ID must be 1 to 255 characters")
+        if self.identity_continuity_bound_at is not None and not _aware(
+            self.identity_continuity_bound_at
+        ):
+            raise ValueError("identity continuity binding time must be timezone-aware")
 
     @classmethod
     def create(
@@ -64,6 +80,28 @@ class RuntimePrincipal:
     @property
     def usage_limits_configured(self) -> bool:
         return self.daily_usage_limit_units is not None
+
+    @property
+    def identity_continuity_ready(self) -> bool:
+        return self.legacy_runtime_principal_id is not None
+
+    @property
+    def continuity_identity_ids(self) -> frozenset[str]:
+        values = [str(self.principal_id)]
+        if self.legacy_runtime_principal_id is not None:
+            values.append(self.legacy_runtime_principal_id)
+        return frozenset(values)
+
+    def bind_identity_continuity(self, legacy_id: str, at: datetime) -> "RuntimePrincipal":
+        if not self.is_active:
+            raise ValueError("disabled principals cannot be prepared for cutover")
+        if self.identity_continuity_ready:
+            raise ValueError("runtime identity continuity is already bound")
+        return replace(
+            self,
+            legacy_runtime_principal_id=legacy_id,
+            identity_continuity_bound_at=at,
+        )
 
     def initialize_usage_limits(
         self, daily_usage_limit_units: int, per_invocation_allowance_units: int

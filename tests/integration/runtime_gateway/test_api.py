@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID, uuid4
@@ -26,6 +27,7 @@ from valor.runtime_gateway.application.errors import UsageLimitUnavailable
 from valor.runtime_gateway.application.reporting import RuntimeReportUnavailable
 from valor.runtime_gateway.infrastructure.cost_budget import ConfiguredTenantCostBudgets
 from valor.runtime_gateway.infrastructure.pricing import ConfiguredInvocationPricing
+from valor.runtime_identity.application.handlers import RuntimeIdentityActor
 
 
 class FailingUsageReader:
@@ -942,6 +944,168 @@ def test_persisted_usage_limits_do_not_replace_live_static_authority(
     assert response.status_code == 429
     assert response.json()["title"] == "Runtime Usage Limit Reached"
     assert len(runtime_provider.calls) == 1
+
+
+@pytest.mark.integration
+def test_continuity_combines_legacy_and_canonical_usage_without_rewriting_history(
+    runtime_client: TestClient,
+    runtime_provider: DeterministicRuntimeProvider,
+    runtime_database_url: str,
+) -> None:
+    tenant_id, agent_id, model_id = runtime_references(runtime_client)
+    set_permission(runtime_client, tenant_id, agent_id, model_id, "allow")
+    persisted = runtime_client.post(
+        "/api/v1/management/runtime-principals",
+        json={
+            "tenant_id": str(tenant_id),
+            "agent_id": str(agent_id),
+            "daily_usage_limit_units": 1000,
+            "per_invocation_allowance_units": 100,
+        },
+    ).json()
+    canonical_id = persisted["principal"]["principal_id"]
+    legacy_id = "legacy-continuity-usage"
+
+    configure_runtime_principal(
+        runtime_client,
+        tenant_id,
+        agent_id,
+        principal_id=legacy_id,
+        usage_limit=1000,
+        allowance=100,
+    )
+    runtime_provider.usage_totals = [70]
+    legacy_invocation = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+    assert legacy_invocation.status_code == 201
+    assert legacy_invocation.json()["runtime_principal_id"] == legacy_id
+
+    configure_runtime_principal(
+        runtime_client,
+        tenant_id,
+        agent_id,
+        principal_id=canonical_id,
+        usage_limit=1000,
+        allowance=100,
+    )
+    runtime_provider.usage_totals = [10]
+    canonical_invocation = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(model_id),
+        headers=runtime_headers(agent_id),
+    )
+    assert canonical_invocation.status_code == 201
+    assert canonical_invocation.json()["runtime_principal_id"] == canonical_id
+
+    configure_runtime_principal(
+        runtime_client,
+        tenant_id,
+        agent_id,
+        principal_id=legacy_id,
+        usage_limit=1000,
+        allowance=100,
+    )
+    path = f"/api/v1/management/runtime-principals/{canonical_id}/identity-continuity"
+    payload = {"legacy_runtime_principal_id": legacy_id}
+    preflight = runtime_client.post(f"{path}/preflight", json=payload)
+    assert preflight.status_code == 200
+    assert preflight.json()["historical_invocation_count"] == 1
+    assert preflight.json()["same_day_attributed_usage_units"] == 70
+    assert preflight.json()["historical_bindings_consistent"] is True
+    assert preflight.json()["safe_to_bind"] is True
+    assert runtime_client.post(path, json=payload).status_code == 200
+
+    app = cast(FastAPI, runtime_client.app)
+    actor = RuntimeIdentityActor(app.state.test_management_principal_id, True)
+    now = datetime.now(UTC)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    total = asyncio.run(
+        app.state.runtime_identity_service.continuity_usage_total(
+            actor, UUID(canonical_id), start, start + timedelta(days=1)
+        )
+    )
+    assert total == 80
+
+    async def stored_ids() -> set[str]:
+        engine = create_async_engine(runtime_database_url)
+        async with engine.connect() as connection:
+            values = set(
+                await connection.scalars(
+                    text(
+                        "SELECT runtime_principal_id FROM invocations "
+                        "WHERE runtime_principal_id IN (:legacy_id, :canonical_id)"
+                    ),
+                    {
+                        "legacy_id": legacy_id,
+                        "canonical_id": canonical_id,
+                    },
+                )
+            )
+        await engine.dispose()
+        return values
+
+    assert asyncio.run(stored_ids()) == {legacy_id, canonical_id}
+
+
+@pytest.mark.integration
+def test_continuity_rejects_contradictory_historical_binding(
+    runtime_client: TestClient,
+) -> None:
+    target_tenant, target_agent, _ = runtime_references(runtime_client)
+    persisted = runtime_client.post(
+        "/api/v1/management/runtime-principals",
+        json={
+            "tenant_id": str(target_tenant),
+            "agent_id": str(target_agent),
+            "daily_usage_limit_units": 10_000,
+            "per_invocation_allowance_units": 100,
+        },
+    ).json()
+    target_id = persisted["principal"]["principal_id"]
+
+    other_tenant = create_tenant(runtime_client, "Continuity conflicting tenant")
+    other_agent = create_agent(runtime_client, other_tenant, "Continuity conflicting agent")
+    other_model = create_model(runtime_client, other_tenant, "Continuity conflicting model")
+    set_permission(runtime_client, other_tenant, other_agent, other_model, "allow")
+    legacy_id = "legacy-contradictory-history"
+    configure_runtime_principal(
+        runtime_client,
+        other_tenant,
+        other_agent,
+        principal_id=legacy_id,
+        usage_limit=10_000,
+        allowance=100,
+    )
+    historical = runtime_client.post(
+        "/api/v1/runtime/invocations",
+        json=invocation_payload(other_model),
+        headers=runtime_headers(other_agent),
+    )
+    assert historical.status_code == 201
+
+    app = cast(FastAPI, runtime_client.app)
+    app.state.settings.runtime_auth = RuntimeAuthenticationSettings(
+        principals=(
+            RuntimePrincipalSettings(
+                principal_id=legacy_id,
+                tenant_id=target_tenant,
+                agent_id=target_agent,
+                credential="legacy-contradiction-token-at-least-32-bytes",
+                usage_limit=10_000,
+                per_invocation_allowance=100,
+            ),
+        )
+    )
+    path = f"/api/v1/management/runtime-principals/{target_id}/identity-continuity"
+    payload = {"legacy_runtime_principal_id": legacy_id}
+    preflight = runtime_client.post(f"{path}/preflight", json=payload)
+    assert preflight.status_code == 200
+    assert preflight.json()["historical_bindings_consistent"] is False
+    assert preflight.json()["safe_to_bind"] is False
+    assert runtime_client.post(path, json=payload).status_code == 422
 
 
 @pytest.mark.integration

@@ -12,15 +12,20 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from tests.integration.management_helpers import grant_management_scopes
 from valor.bootstrap.settings import RuntimeAuthenticationSettings, RuntimePrincipalSettings
+from valor.runtime_identity.application.errors import RuntimeIdentityContinuityConflict
 from valor.runtime_identity.application.handlers import (
     CreateRuntimePrincipalCommand,
     InitializeRuntimeUsageLimitsCommand,
     IssueRuntimeCredentialCommand,
     RuntimeCredentialCommand,
     RuntimeIdentityActor,
+    RuntimeIdentityContinuityCommand,
     RuntimeIdentityService,
 )
 from valor.runtime_identity.domain.models import RuntimeCredential
+from valor.runtime_identity.infrastructure.legacy_configuration import (
+    ConfiguredLegacyRuntimeIdentities,
+)
 from valor.runtime_identity.infrastructure.unit_of_work import (
     SqlAlchemyRuntimeIdentityUnitOfWork,
 )
@@ -499,6 +504,39 @@ async def test_every_runtime_identity_mutation_rolls_back_when_audit_fails(
     with pytest.raises(RuntimeError, match="audit failure"):
         await failing.disable_principal(actor, principal_id)
 
+    app = cast(FastAPI, runtime_client.app)
+    app.state.settings.runtime_auth = RuntimeAuthenticationSettings(
+        principals=(
+            RuntimePrincipalSettings(
+                principal_id="legacy-atomic-continuity",
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                credential="legacy-atomic-token-that-is-at-least-32-bytes",
+                usage_limit=1000,
+                per_invocation_allowance=100,
+            ),
+        )
+    )
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE runtime_principals SET daily_usage_limit_units=1000, "
+                "per_invocation_allowance_units=100 WHERE principal_id=:principal_id"
+            ),
+            {"principal_id": principal_id},
+        )
+    continuity_failing = RuntimeIdentityService(
+        partial(_AuditFailingRuntimeIdentityUow, sessions),
+        pepper="runtime-pepper-distinct-and-at-least-32-bytes",
+        legacy_configurations=ConfiguredLegacyRuntimeIdentities(
+            lambda: app.state.settings.runtime_auth
+        ),
+    )
+    with pytest.raises(RuntimeError, match="audit failure"):
+        await continuity_failing.bind_identity_continuity(
+            RuntimeIdentityContinuityCommand(actor, principal_id, "legacy-atomic-continuity")
+        )
+
     async with sessions() as session:
         assert await session.scalar(text("SELECT count(*) FROM runtime_principals")) == 1
         assert await session.scalar(text("SELECT count(*) FROM runtime_credentials")) == 1
@@ -524,7 +562,14 @@ async def test_every_runtime_identity_mutation_rolls_back_when_audit_fails(
                 ),
                 {"principal_id": principal_id},
             )
-            is True
+            is False
+        )
+        assert await session.scalar(
+            text(
+                "SELECT legacy_runtime_principal_id IS NULL "
+                "FROM runtime_principals WHERE principal_id = :principal_id"
+            ),
+            {"principal_id": principal_id},
         )
     await engine.dispose()
 
@@ -559,4 +604,250 @@ async def test_initial_credential_failure_does_not_strand_runtime_principal(
     async with sessions() as session:
         assert await session.scalar(text("SELECT count(*) FROM runtime_principals")) == 0
         assert await session.scalar(text("SELECT count(*) FROM runtime_credentials")) == 0
+    await engine.dispose()
+
+
+@pytest.mark.integration
+def test_identity_continuity_is_explicit_one_time_and_non_activating(
+    runtime_client: TestClient, runtime_database_url: str
+) -> None:
+    tenant_id, agent_id = _tenant_and_agent(runtime_client, "continuity")
+    first = _create(runtime_client, tenant_id, agent_id)
+    second = _create(runtime_client, tenant_id, agent_id)
+    first_id = first["principal"]["principal_id"]
+    second_id = second["principal"]["principal_id"]
+    legacy_id = "legacy-runtime-continuity"
+    app = cast(FastAPI, runtime_client.app)
+    app.state.settings.runtime_auth = RuntimeAuthenticationSettings(
+        principals=(
+            RuntimePrincipalSettings(
+                principal_id=legacy_id,
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                credential="legacy-runtime-continuity-token-at-least-32-bytes",
+                usage_limit=1000,
+                per_invocation_allowance=100,
+            ),
+        )
+    )
+    request = {"legacy_runtime_principal_id": legacy_id}
+    preflight_path = (
+        f"/api/v1/management/runtime-principals/{first_id}/identity-continuity/preflight"
+    )
+    assert (
+        runtime_client.post(
+            preflight_path,
+            headers={"Authorization": f"Bearer {first['credential']['bearer_token']}"},
+            json=request,
+        ).status_code
+        == 401
+    )
+    assert (
+        runtime_client.post(preflight_path, headers={"Authorization": ""}, json=request).status_code
+        == 401
+    )
+
+    preflight = runtime_client.post(
+        preflight_path,
+        json=request,
+    )
+    assert preflight.status_code == 200, preflight.text
+    assert preflight.json()["safe_to_bind"] is True
+    assert preflight.json()["historical_invocation_count"] == 0
+
+    bound = runtime_client.post(
+        f"/api/v1/management/runtime-principals/{first_id}/identity-continuity",
+        json=request,
+    )
+    assert bound.status_code == 200, bound.text
+    assert bound.json()["legacy_runtime_principal_id"] == legacy_id
+    assert bound.json()["identity_continuity_ready"] is True
+    assert (
+        runtime_client.post(
+            f"/api/v1/management/runtime-principals/{first_id}/identity-continuity",
+            json=request,
+        ).status_code
+        == 409
+    )
+    second_preflight = runtime_client.post(
+        f"/api/v1/management/runtime-principals/{second_id}/identity-continuity/preflight",
+        json=request,
+    )
+    assert second_preflight.json()["legacy_identity_unclaimed"] is False
+    assert second_preflight.json()["safe_to_bind"] is False
+    assert (
+        runtime_client.post(
+            f"/api/v1/management/runtime-principals/{second_id}/identity-continuity",
+            json=request,
+        ).status_code
+        == 409
+    )
+    assert (
+        runtime_client.post(
+            "/api/v1/runtime/invocations",
+            headers={"Authorization": f"Bearer {first['credential']['bearer_token']}"},
+            json={},
+        ).status_code
+        == 401
+    )
+
+    async def inspect() -> tuple[int, int]:
+        engine = create_async_engine(runtime_database_url)
+        async with engine.connect() as connection:
+            audit_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM management_audit_records "
+                    "WHERE action='runtime_principal_identity_continuity_bound'"
+                )
+            )
+            rewritten = await connection.scalar(
+                text("SELECT count(*) FROM invocations WHERE runtime_principal_id = :canonical_id"),
+                {"canonical_id": first_id},
+            )
+        await engine.dispose()
+        return int(audit_count or 0), int(rewritten or 0)
+
+    assert asyncio.run(inspect()) == (1, 0)
+
+
+@pytest.mark.integration
+def test_identity_continuity_preflight_rejects_usage_mismatch(
+    runtime_client: TestClient,
+) -> None:
+    tenant_id, agent_id = _tenant_and_agent(runtime_client, "continuity mismatch")
+    created = _create(runtime_client, tenant_id, agent_id)
+    principal_id = created["principal"]["principal_id"]
+    app = cast(FastAPI, runtime_client.app)
+    app.state.settings.runtime_auth = RuntimeAuthenticationSettings(
+        principals=(
+            RuntimePrincipalSettings(
+                principal_id="legacy-mismatched-limits",
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                credential="legacy-mismatch-token-that-is-at-least-32-bytes",
+                usage_limit=2000,
+                per_invocation_allowance=200,
+            ),
+        )
+    )
+    request = {"legacy_runtime_principal_id": "legacy-mismatched-limits"}
+    preflight = runtime_client.post(
+        f"/api/v1/management/runtime-principals/{principal_id}/identity-continuity/preflight",
+        json=request,
+    )
+    assert preflight.status_code == 200
+    assert preflight.json()["usage_limits_match"] is False
+    assert preflight.json()["safe_to_bind"] is False
+    assert (
+        runtime_client.post(
+            f"/api/v1/management/runtime-principals/{principal_id}/identity-continuity",
+            json=request,
+        ).status_code
+        == 422
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_concurrent_identity_continuity_claims_have_exactly_one_winner(
+    runtime_client: TestClient, runtime_database_url: str
+) -> None:
+    tenant_id, agent_id = _tenant_and_agent(runtime_client, "continuity concurrency")
+    first = _create(runtime_client, tenant_id, agent_id)
+    second = _create(runtime_client, tenant_id, agent_id)
+    third = _create(runtime_client, tenant_id, agent_id)
+    first_id = UUID(first["principal"]["principal_id"])
+    second_id = UUID(second["principal"]["principal_id"])
+    third_id = UUID(third["principal"]["principal_id"])
+    app = cast(FastAPI, runtime_client.app)
+    actor = RuntimeIdentityActor(app.state.test_management_principal_id, True)
+    settings = RuntimeAuthenticationSettings(
+        principals=(
+            RuntimePrincipalSettings(
+                principal_id="legacy-concurrent-claim",
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                credential="legacy-concurrent-token-that-is-at-least-32-bytes",
+                usage_limit=1000,
+                per_invocation_allowance=100,
+            ),
+        )
+    )
+    engine = create_async_engine(runtime_database_url)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    service = RuntimeIdentityService(
+        partial(SqlAlchemyRuntimeIdentityUnitOfWork, sessions),
+        pepper="runtime-pepper-distinct-and-at-least-32-bytes",
+        legacy_configurations=ConfiguredLegacyRuntimeIdentities(lambda: settings),
+    )
+
+    results = await asyncio.gather(
+        service.bind_identity_continuity(
+            RuntimeIdentityContinuityCommand(actor, first_id, "legacy-concurrent-claim")
+        ),
+        service.bind_identity_continuity(
+            RuntimeIdentityContinuityCommand(actor, second_id, "legacy-concurrent-claim")
+        ),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(value, RuntimeIdentityContinuityConflict) for value in results) == 1
+    assert sum(not isinstance(value, BaseException) for value in results) == 1
+
+    def singleton_settings(legacy_id: str) -> RuntimeAuthenticationSettings:
+        return RuntimeAuthenticationSettings(
+            principals=(
+                RuntimePrincipalSettings(
+                    principal_id=legacy_id,
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    credential=f"{legacy_id}-token-that-is-at-least-32-bytes",
+                    usage_limit=1000,
+                    per_invocation_allowance=100,
+                ),
+            )
+        )
+
+    first_alias_settings = singleton_settings("legacy-concurrent-alias-one")
+    second_alias_settings = singleton_settings("legacy-concurrent-alias-two")
+    first_alias_service = RuntimeIdentityService(
+        partial(SqlAlchemyRuntimeIdentityUnitOfWork, sessions),
+        pepper="runtime-pepper-distinct-and-at-least-32-bytes",
+        legacy_configurations=ConfiguredLegacyRuntimeIdentities(lambda: first_alias_settings),
+    )
+    second_alias_service = RuntimeIdentityService(
+        partial(SqlAlchemyRuntimeIdentityUnitOfWork, sessions),
+        pepper="runtime-pepper-distinct-and-at-least-32-bytes",
+        legacy_configurations=ConfiguredLegacyRuntimeIdentities(lambda: second_alias_settings),
+    )
+    alias_results = await asyncio.gather(
+        first_alias_service.bind_identity_continuity(
+            RuntimeIdentityContinuityCommand(actor, third_id, "legacy-concurrent-alias-one")
+        ),
+        second_alias_service.bind_identity_continuity(
+            RuntimeIdentityContinuityCommand(actor, third_id, "legacy-concurrent-alias-two")
+        ),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(value, RuntimeIdentityContinuityConflict) for value in alias_results) == 1
+    assert sum(not isinstance(value, BaseException) for value in alias_results) == 1
+
+    async with sessions() as session:
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM runtime_principals "
+                    "WHERE legacy_runtime_principal_id='legacy-concurrent-claim'"
+                )
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM management_audit_records "
+                    "WHERE action='runtime_principal_identity_continuity_bound'"
+                )
+            )
+            == 2
+        )
     await engine.dispose()

@@ -6,7 +6,7 @@ VALOR is not an agent framework, chatbot, LLM provider, generic API gateway, mon
 
 ## Status
 
-**Current phase: Phase 5.0B — persisted Runtime usage configuration and cutover readiness.**
+**Current phase: Phase 5.0B.1 — explicit Runtime Principal identity continuity.**
 
 Implemented: the Phase 0 engineering foundation; Tenant create/get; AI Asset Registry Agent and governed Model reference register/get; one synchronous OpenAI Runtime Gateway path; Policy & Risk Agent-to-Model ALLOW/DENY permissions with default-deny enforcement, persisted decisions, and denied runtime outcomes; persisted Management Principals with independent revocable credentials and Tenant scopes; separate static Runtime Principal authentication with Invocation read isolation; persisted Invocation duration, normalized provider usage, safe provider response correlation, immutable estimated-cost snapshots; bounded Tenant-scoped Runtime usage/cost reporting; and sequential Tenant daily estimated-cost budget enforcement.
 
@@ -28,6 +28,13 @@ Phase 5.0B adds immutable persisted daily usage limits to new Runtime Principals
 initializer for legacy 5.0A rows. Safe Principal retrieval reports whether identity, usage limits,
 and at least one potentially usable credential are ready for cutover. This is provisioning state:
 static Runtime configuration remains the only live authentication and usage-limit authority.
+
+Phase 5.0B.1 adds an immutable, one-to-one binding from an explicitly selected legacy static
+Runtime Principal ID to a persisted Runtime Principal UUID. A privileged read-only preflight
+validates current static configuration, exact Tenant/Agent binding, historical Invocation
+consistency, usage-limit equality, credential readiness, and claim availability before an atomic,
+audited bind. Historical Invocation IDs are not rewritten. Static Runtime authentication and usage
+limits remain live until Phase 5.0C.
 
 Planned: the Phase 5.0C Runtime authentication and usage-limit cutover, richer conditional policy,
 human approval, tool/MCP governance, runtime routing and additional providers, evaluation,
@@ -100,6 +107,8 @@ POST /api/v1/management/principals/{principal_id}/disable
 POST /api/v1/management/runtime-principals
 GET  /api/v1/management/runtime-principals/{principal_id}
 PUT  /api/v1/management/runtime-principals/{principal_id}/usage-limits
+POST /api/v1/management/runtime-principals/{principal_id}/identity-continuity/preflight
+POST /api/v1/management/runtime-principals/{principal_id}/identity-continuity
 POST /api/v1/management/runtime-principals/{principal_id}/credentials
 POST /api/v1/management/runtime-principals/{principal_id}/credentials/{credential_id}/revoke
 POST /api/v1/management/runtime-principals/{principal_id}/disable

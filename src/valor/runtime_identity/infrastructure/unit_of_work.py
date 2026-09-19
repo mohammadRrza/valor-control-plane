@@ -1,7 +1,10 @@
 from valor.infrastructure.sqlalchemy_uow import SqlAlchemyUnitOfWork
 from valor.management_audit.domain.repositories import ManagementAuditRepository
 from valor.management_audit.infrastructure.repositories import SqlAlchemyManagementAuditRepository
-from valor.runtime_identity.application.ports import RuntimeBindingPort
+from valor.runtime_identity.application.ports import (
+    RuntimeBindingPort,
+    RuntimeInvocationContinuityPort,
+)
 from valor.runtime_identity.domain.repositories import (
     RuntimeCredentialRepository,
     RuntimePrincipalRepository,
@@ -9,6 +12,7 @@ from valor.runtime_identity.domain.repositories import (
 from valor.runtime_identity.infrastructure.repositories import (
     SqlAlchemyRuntimeBinding,
     SqlAlchemyRuntimeCredentialRepository,
+    SqlAlchemyRuntimeInvocationContinuity,
     SqlAlchemyRuntimePrincipalRepository,
 )
 
@@ -31,6 +35,12 @@ class SqlAlchemyRuntimeIdentityUnitOfWork(SqlAlchemyUnitOfWork):
         if self.session is None:
             raise RuntimeError("Unit of Work has not been entered")
         return SqlAlchemyRuntimeBinding(self.session)
+
+    @property
+    def invocations(self) -> RuntimeInvocationContinuityPort:
+        if self.session is None:
+            raise RuntimeError("Unit of Work has not been entered")
+        return SqlAlchemyRuntimeInvocationContinuity(self.session)
 
     @property
     def audits(self) -> ManagementAuditRepository:

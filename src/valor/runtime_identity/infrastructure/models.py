@@ -29,7 +29,22 @@ class RuntimePrincipalRow(SqlAlchemyBase):
             "per_invocation_allowance_units <= daily_usage_limit_units",
             name="ck_runtime_principal_allowance_within_limit",
         ),
+        CheckConstraint(
+            "(legacy_runtime_principal_id IS NULL AND identity_continuity_bound_at IS NULL) OR "
+            "(legacy_runtime_principal_id IS NOT NULL AND "
+            "identity_continuity_bound_at IS NOT NULL)",
+            name="ck_runtime_principal_continuity_together",
+        ),
+        CheckConstraint(
+            "legacy_runtime_principal_id IS NULL OR length(btrim(legacy_runtime_principal_id)) > 0",
+            name="ck_runtime_principal_legacy_id_nonblank",
+        ),
         Index("ix_runtime_principals_binding", "tenant_id", "agent_id"),
+        Index(
+            "uq_runtime_principals_legacy_identity",
+            "legacy_runtime_principal_id",
+            unique=True,
+        ),
     )
     principal_id: Mapped[UUID] = mapped_column(primary_key=True)
     tenant_id: Mapped[UUID] = mapped_column(
@@ -42,6 +57,8 @@ class RuntimePrincipalRow(SqlAlchemyBase):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     daily_usage_limit_units: Mapped[int | None] = mapped_column(Integer)
     per_invocation_allowance_units: Mapped[int | None] = mapped_column(Integer)
+    legacy_runtime_principal_id: Mapped[str | None] = mapped_column(String(255))
+    identity_continuity_bound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RuntimeCredentialRow(SqlAlchemyBase):

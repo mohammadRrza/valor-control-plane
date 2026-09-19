@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from valor.management_audit.domain.audit_record import (
@@ -17,11 +17,13 @@ from valor.runtime_identity.application.errors import (
     InvalidRuntimeIdentityCommand,
     RuntimeBindingNotFound,
     RuntimeCredentialNotFound,
+    RuntimeIdentityContinuityConflict,
     RuntimePrincipalManagementDenied,
     RuntimePrincipalNotFound,
     RuntimeUsageLimitsAlreadyInitialized,
 )
 from valor.runtime_identity.application.ports import (
+    LegacyRuntimeConfigurationPort,
     RuntimeIdentityUnitOfWork,
     RuntimeIdentityUnitOfWorkFactory,
 )
@@ -84,17 +86,43 @@ class RuntimePrincipalDetails:
     cutover_ready: bool
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeIdentityContinuityCommand:
+    actor: RuntimeIdentityActor
+    principal_id: UUID
+    legacy_runtime_principal_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeIdentityContinuityPreflight:
+    principal_id: UUID
+    legacy_runtime_principal_id: str
+    static_identity_exists: bool
+    tenant_binding_matches: bool
+    agent_binding_matches: bool
+    legacy_identity_unclaimed: bool
+    principal_unbound: bool
+    historical_invocation_count: int
+    same_day_attributed_usage_units: int
+    usage_limits_match: bool
+    historical_bindings_consistent: bool
+    cutover_ready: bool
+    safe_to_bind: bool
+
+
 class RuntimeIdentityService:
     def __init__(
         self,
         uow_factory: RuntimeIdentityUnitOfWorkFactory,
         *,
         pepper: str,
+        legacy_configurations: LegacyRuntimeConfigurationPort | None = None,
         id_factory: Callable[[], UUID] = uuid4,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._uow_factory = uow_factory
         self._pepper = pepper
+        self._legacy_configurations = legacy_configurations
         self._id_factory = id_factory
         self._clock = clock
 
@@ -160,6 +188,135 @@ class RuntimeIdentityService:
         return RuntimePrincipalDetails(
             value,
             value.is_active and value.usage_limits_configured and has_usable_credential,
+        )
+
+    async def preflight_identity_continuity(
+        self, command: RuntimeIdentityContinuityCommand
+    ) -> RuntimeIdentityContinuityPreflight:
+        self._require_manager(command.actor)
+        now = self._clock()
+        async with self._uow_factory() as uow:
+            principal = await uow.principals.get(command.principal_id)
+            if principal is None or not principal.is_active:
+                raise RuntimePrincipalNotFound
+            return await self._continuity_preflight(uow, principal, command, now)
+
+    async def bind_identity_continuity(
+        self, command: RuntimeIdentityContinuityCommand
+    ) -> RuntimePrincipal:
+        self._require_manager(command.actor)
+        now = self._clock()
+        async with self._uow_factory() as uow:
+            await uow.principals.lock_legacy_identity(command.legacy_runtime_principal_id)
+            principal = await uow.principals.get_for_update(command.principal_id)
+            if principal is None or not principal.is_active:
+                raise RuntimePrincipalNotFound
+            if (
+                principal.identity_continuity_ready
+                or await uow.principals.legacy_identity_is_claimed(
+                    command.legacy_runtime_principal_id
+                )
+            ):
+                raise RuntimeIdentityContinuityConflict
+            preflight = await self._continuity_preflight(uow, principal, command, now)
+            if not preflight.safe_to_bind:
+                raise InvalidRuntimeIdentityCommand(
+                    "Runtime identity continuity validation did not pass."
+                )
+            try:
+                bound = principal.bind_identity_continuity(command.legacy_runtime_principal_id, now)
+            except ValueError as exc:
+                raise InvalidRuntimeIdentityCommand(str(exc)) from exc
+            if not await uow.principals.bind_identity_continuity(bound):
+                raise RuntimeIdentityContinuityConflict
+            await self._audit_principal(
+                uow,
+                command.actor.principal_id,
+                bound,
+                principal,
+                ManagementAuditAction.RUNTIME_PRINCIPAL_IDENTITY_CONTINUITY_BOUND,
+                now,
+            )
+            await uow.commit()
+        return bound
+
+    async def continuity_usage_total(
+        self,
+        actor: RuntimeIdentityActor,
+        principal_id: UUID,
+        day_start: datetime,
+        day_end: datetime,
+    ) -> int:
+        self._require_manager(actor)
+        async with self._uow_factory() as uow:
+            principal = await uow.principals.get(principal_id)
+            if principal is None:
+                raise RuntimePrincipalNotFound
+            return await uow.invocations.consumed_total_units(
+                principal.continuity_identity_ids, day_start, day_end
+            )
+
+    async def _continuity_preflight(
+        self,
+        uow: RuntimeIdentityUnitOfWork,
+        principal: RuntimePrincipal,
+        command: RuntimeIdentityContinuityCommand,
+        now: datetime,
+    ) -> RuntimeIdentityContinuityPreflight:
+        legacy = (
+            None
+            if self._legacy_configurations is None
+            else self._legacy_configurations.get(command.legacy_runtime_principal_id)
+        )
+        day_start = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        facts = await uow.invocations.inspect(
+            legacy_id=command.legacy_runtime_principal_id,
+            canonical_id=str(principal.principal_id),
+            tenant_id=principal.tenant_id,
+            agent_id=principal.agent_id,
+            day_start=day_start,
+            day_end=day_start + timedelta(days=1),
+        )
+        tenant_matches = legacy is not None and legacy.tenant_id == principal.tenant_id
+        agent_matches = legacy is not None and legacy.agent_id == principal.agent_id
+        limits_match = (
+            legacy is not None
+            and principal.daily_usage_limit_units == legacy.daily_usage_limit_units
+            and principal.per_invocation_allowance_units == legacy.per_invocation_allowance_units
+        )
+        unclaimed = not await uow.principals.legacy_identity_is_claimed(
+            command.legacy_runtime_principal_id
+        )
+        has_credential = await uow.credentials.has_potentially_usable(principal.principal_id, now)
+        cutover_ready = principal.is_active and principal.usage_limits_configured and has_credential
+        consistent = not facts.legacy_binding_mismatch and not facts.canonical_binding_mismatch
+        principal_unbound = not principal.identity_continuity_ready
+        safe = all(
+            (
+                legacy is not None,
+                tenant_matches,
+                agent_matches,
+                unclaimed,
+                principal_unbound,
+                limits_match,
+                consistent,
+                cutover_ready,
+            )
+        )
+        return RuntimeIdentityContinuityPreflight(
+            principal.principal_id,
+            command.legacy_runtime_principal_id,
+            legacy is not None,
+            tenant_matches,
+            agent_matches,
+            unclaimed,
+            principal_unbound,
+            facts.historical_invocation_count,
+            facts.same_day_attributed_usage_units,
+            limits_match,
+            consistent,
+            cutover_ready,
+            safe,
         )
 
     async def initialize_usage_limits(
@@ -317,6 +474,7 @@ class RuntimeIdentityService:
                 disabled=not principal.is_active,
                 daily_usage_limit_units=principal.daily_usage_limit_units,
                 per_invocation_allowance_units=principal.per_invocation_allowance_units,
+                legacy_runtime_principal_id=principal.legacy_runtime_principal_id,
             )
 
         await uow.audits.append(

@@ -6,6 +6,7 @@ from valor.runtime_identity.application.errors import (
     InvalidRuntimeIdentityCommand,
     RuntimeBindingNotFound,
     RuntimeCredentialNotFound,
+    RuntimeIdentityContinuityConflict,
     RuntimePrincipalManagementDenied,
     RuntimePrincipalNotFound,
     RuntimeUsageLimitsAlreadyInitialized,
@@ -47,4 +48,16 @@ def install_runtime_identity_error_handlers(app: FastAPI) -> None:
             title="Runtime Usage Limits Already Initialized",
             status_code=status.HTTP_409_CONFLICT,
             detail="Runtime usage limits can only be initialized once.",
+        )
+
+    @app.exception_handler(RuntimeIdentityContinuityConflict)
+    async def continuity_conflict(
+        request: Request, exc: RuntimeIdentityContinuityConflict
+    ) -> JSONResponse:
+        del exc
+        return problem_response(
+            request,
+            title="Runtime Identity Continuity Conflict",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The Runtime identity continuity binding is already claimed.",
         )

@@ -9,6 +9,7 @@ from valor.runtime_identity.application.handlers import (
     IssueRuntimeCredentialCommand,
     RuntimeCredentialCommand,
     RuntimeIdentityActor,
+    RuntimeIdentityContinuityCommand,
     RuntimeIdentityService,
 )
 from valor.runtime_identity.presentation.schemas import (
@@ -17,6 +18,8 @@ from valor.runtime_identity.presentation.schemas import (
     CredentialRequest,
     IssuedRuntimeCredentialResponse,
     RuntimeCredentialResponse,
+    RuntimeIdentityContinuityPreflightResponse,
+    RuntimeIdentityContinuityRequest,
     RuntimePrincipalResponse,
     RuntimeUsageLimitsRequest,
 )
@@ -81,6 +84,41 @@ async def initialize_usage_limits(
             principal_id,
             payload.daily_usage_limit_units,
             payload.per_invocation_allowance_units,
+        )
+    )
+    return RuntimePrincipalResponse.from_details(
+        await identity.get_principal(actor(principal), principal_id)
+    )
+
+
+@router.post(
+    "/{principal_id}/identity-continuity/preflight",
+    response_model=RuntimeIdentityContinuityPreflightResponse,
+)
+async def preflight_identity_continuity(
+    principal_id: UUID,
+    payload: RuntimeIdentityContinuityRequest,
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
+    identity: Annotated[RuntimeIdentityService, Depends(service)],
+) -> RuntimeIdentityContinuityPreflightResponse:
+    result = await identity.preflight_identity_continuity(
+        RuntimeIdentityContinuityCommand(
+            actor(principal), principal_id, payload.legacy_runtime_principal_id
+        )
+    )
+    return RuntimeIdentityContinuityPreflightResponse.from_application(result)
+
+
+@router.post("/{principal_id}/identity-continuity", response_model=RuntimePrincipalResponse)
+async def bind_identity_continuity(
+    principal_id: UUID,
+    payload: RuntimeIdentityContinuityRequest,
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_management_principal)],
+    identity: Annotated[RuntimeIdentityService, Depends(service)],
+) -> RuntimePrincipalResponse:
+    await identity.bind_identity_continuity(
+        RuntimeIdentityContinuityCommand(
+            actor(principal), principal_id, payload.legacy_runtime_principal_id
         )
     )
     return RuntimePrincipalResponse.from_details(

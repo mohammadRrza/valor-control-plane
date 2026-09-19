@@ -26,11 +26,25 @@ credentials are not accepted by Runtime Gateway, and static configured Runtime P
 the sole authentication and usage-limit authority. Phase 5.0C will replace both authorities in one
 explicit change. OIDC, mTLS, federation, MFA, dashboards, alerting, and generic IAM are deferred.
 
+Phase 5.0B.1 addresses a cutover blocker: legacy static Principal IDs are arbitrary strings while
+persisted IDs are UUIDs. Each persisted Principal may therefore acquire one immutable historical
+legacy ID, and each legacy ID may be claimed once. The operator explicitly selects both identities;
+Tenant/Agent matching never chooses a Principal. A read-only preflight verifies current static
+configuration, bindings, historical and canonical Invocation consistency, equal usage limits, and
+credential readiness. Binding repeats those checks under locks and appends an atomic audit record.
+
+Historical Invocation IDs are not rewritten. This preserves evidence, avoids racing live static
+traffic, and requires no traffic freeze. Phase 5.0C will use the bounded set containing the
+canonical UUID string and optional single legacy ID for usage aggregation and historical read
+isolation. The alias is identity metadata only and never authenticates a bearer.
+
 ## Consequences
 
 Operators gain durable, auditable rotation and disablement primitives without dual authentication
 authority. Through Phase 5.0B, those primitives do not reduce live static Runtime bearer replay
 risk. Migration 0019 preserves 5.0A rows without inventing limits; downgrade to 0018 discards only
 usage-limit preparation and its initialization audits.
+Migration 0020 adds nullable continuity metadata without guessing mappings. Downgrading to 0019
+loses continuity preparation and its binding audits but does not rewrite Invocation evidence.
 Downgrading below migration 0018 destroys the inactive provisioning state but does not affect
 current static Runtime authentication.
